@@ -48,7 +48,7 @@ class RunSessionService : Service() {
     private var sessionToken = 0L
     private var lastTimerSecond = Long.MIN_VALUE
     private var lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
-    private var lastLocationCallbackElapsedMillis: Long? = null
+    private var gpsFreshness = GpsFreshnessTracker()
     private val notificationTracker = SessionNotificationTracker()
 
     private val locationCallback = object : LocationCallback() {
@@ -125,7 +125,7 @@ class RunSessionService : Service() {
         )
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
-        lastLocationCallbackElapsedMillis = null
+        gpsFreshness = GpsFreshnessTracker()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSession()
             return
@@ -145,8 +145,8 @@ class RunSessionService : Service() {
         if (location.elapsedRealtimeNanos <= lastLocationElapsedRealtimeNanos) return
         lastLocationElapsedRealtimeNanos = location.elapsedRealtimeNanos
         val now = SystemClock.elapsedRealtime()
-        lastLocationCallbackElapsedMillis = now
         val sample = LocationSampleMapper().map(location, now)
+        gpsFreshness.record(sample)
         coordinator?.tick(
             elapsedRealtimeMillis = now,
             sample = sample,
@@ -162,9 +162,7 @@ class RunSessionService : Service() {
         val second = elapsedRealtimeMillis / TICK_MILLIS
         if (second == lastTimerSecond) return
         lastTimerSecond = second
-        val gpsOutage = lastLocationCallbackElapsedMillis?.let {
-            elapsedRealtimeMillis - it > GPS_WEAK_TIMEOUT_MILLIS
-        } ?: true
+        val gpsOutage = gpsFreshness.isOutage(elapsedRealtimeMillis)
         coordinator?.advanceTimer(elapsedRealtimeMillis, signalGpsOutage = gpsOutage)
     }
 
@@ -232,6 +230,5 @@ class RunSessionService : Service() {
         private const val CHANNEL_ID = "run_session"
         private const val NOTIFICATION_ID = 1
         private const val TICK_MILLIS = 1_000L
-        private const val GPS_WEAK_TIMEOUT_MILLIS = 3_000L
     }
 }

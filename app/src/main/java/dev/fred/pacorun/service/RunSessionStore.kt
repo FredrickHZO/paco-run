@@ -2,6 +2,7 @@ package dev.fred.pacorun.service
 
 import dev.fred.pacorun.audio.AudioCue
 import dev.fred.pacorun.location.LocationSample
+import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
 import dev.fred.pacorun.pace.PaceEvaluator
 import dev.fred.pacorun.pace.PaceResult
@@ -47,6 +48,20 @@ object RunSessionStore {
 
 data class SessionStartPrerequisites(val hasFineLocation: Boolean) {
     val canStartLocationForegroundService: Boolean get() = hasFineLocation
+}
+
+class GpsFreshnessTracker(
+    private val maxAgeMillis: Long = LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS,
+) {
+    private var latestReliableSampleElapsedRealtimeMillis: Long? = null
+
+    fun record(sample: LocationSample) {
+        if (sample.reliable) latestReliableSampleElapsedRealtimeMillis = sample.elapsedRealtimeMillis
+    }
+
+    fun isOutage(nowElapsedRealtimeMillis: Long): Boolean = latestReliableSampleElapsedRealtimeMillis?.let {
+        nowElapsedRealtimeMillis - it > maxAgeMillis
+    } ?: true
 }
 
 class SessionNotificationTracker {
@@ -137,6 +152,8 @@ class SessionCoordinator(
     private var latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
     private var latestReliableSample: LocationSample? = null
     private var outageActive = false
+    private var lastRoutineTimingBucket = Long.MIN_VALUE
+    private var lastRoutineTimingElapsedRealtimeMillis = Long.MIN_VALUE
 
     private fun process(
         elapsedRealtimeMillis: Long,
@@ -169,7 +186,7 @@ class SessionCoordinator(
         }
         val routine = routineEngine.accept(
             RoutineInput(
-                elapsedRealtimeMillis = elapsedRealtimeMillis,
+                elapsedRealtimeMillis = routineTimingElapsedRealtimeMillis(elapsedRealtimeMillis),
                 reliableDistanceDeltaMeters = distanceDelta,
                 currentReliableSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
                 gpsReliable = gpsReliable,
@@ -211,6 +228,18 @@ class SessionCoordinator(
                 routineDistanceMeters = routine.routineDistanceMeters,
             ),
         )
+    }
+
+    private fun routineTimingElapsedRealtimeMillis(elapsedRealtimeMillis: Long): Long {
+        val bucket = elapsedRealtimeMillis / TIMER_BUCKET_MILLIS
+        if (bucket == lastRoutineTimingBucket) return lastRoutineTimingElapsedRealtimeMillis
+        lastRoutineTimingBucket = bucket
+        lastRoutineTimingElapsedRealtimeMillis = elapsedRealtimeMillis
+        return elapsedRealtimeMillis
+    }
+
+    private companion object {
+        const val TIMER_BUCKET_MILLIS = 1_000L
     }
 }
 

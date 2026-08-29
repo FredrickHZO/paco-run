@@ -6,6 +6,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,19 +69,32 @@ fun PacoRunApp() {
         Unit
     }
 
-    when (val current = session) {
-        RunSessionState.Idle -> SetupScreen(
-            preferences = displayedPreferences,
-            onPreferencesChange = { updated ->
-                editedPreferences = updated
-                scope.launch { store.update { updated } }
-            },
-            onStart = requestStart,
-            permissionMessage = permissionMessage,
-        )
-        RunSessionState.AcquiringGps -> AcquiringGpsScreen(onStop = stop)
-        is RunSessionState.Running -> ActiveRunScreen(state = current, onStop = stop)
+    PacoRunTheme(dynamicColor = displayedPreferences.dynamicColor) {
+        when (val current = session) {
+            RunSessionState.Idle -> SetupScreen(
+                preferences = displayedPreferences,
+                onPreferencesChange = { updated ->
+                    editedPreferences = updated
+                    scope.launch { store.update { updated } }
+                },
+                onStart = requestStart,
+                permissionMessage = permissionMessage,
+            )
+            RunSessionState.AcquiringGps -> AcquiringGpsScreen(onStop = stop)
+            is RunSessionState.Running -> ActiveRunScreen(state = current, onStop = stop)
+        }
     }
+}
+
+@Composable
+fun PacoRunTheme(dynamicColor: Boolean, content: @Composable () -> Unit) {
+    val colorScheme = when {
+        dynamicColor && isSystemInDarkTheme() -> dynamicDarkColorScheme(androidx.compose.ui.platform.LocalContext.current)
+        dynamicColor -> dynamicLightColorScheme(androidx.compose.ui.platform.LocalContext.current)
+        isSystemInDarkTheme() -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+    MaterialTheme(colorScheme = colorScheme, content = content)
 }
 
 private val requiredPermissions = arrayOf(

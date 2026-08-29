@@ -126,6 +126,28 @@ class SessionCoordinatorTest {
     }
 
     @Test
+    fun timerFirstLocationInSameSecondKeepsDistanceAndPaceWithoutAnotherTimingAdvance() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false)
+        coordinator.tick(1_900L, reliableSample(8f, 1_900L), LocationPosition(0.0, .00001, 1_900L))
+
+        assertEquals(listOf(0L, 1_000L, 1_000L), routine.inputs.map { it.elapsedRealtimeMillis })
+        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(2, pace.samples.size)
+        assertEquals(1_900L, pace.samples.last().elapsedRealtimeMillis)
+    }
+
+    @Test
     fun weakGpsCueAndRecoveryClearPaceCandidates() {
         val cues = mutableListOf<AudioCue>()
         val coordinator = SessionCoordinator(

@@ -4,7 +4,7 @@ import android.location.Location
 import java.util.concurrent.TimeUnit
 
 class LocationSampleMapper(
-    private val maxAgeMillis: Long = 3_000L,
+    private val maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS,
     private val maxSpeedAccuracyMps: Float = .35f,
 ) {
     fun map(location: Location, nowElapsedRealtimeMillis: Long): LocationSample {
@@ -38,5 +38,9 @@ class LocationSampleMapper(
             reliable = reliable,
             elapsedRealtimeMillis = elapsedRealtimeMillis,
         )
+    }
+
+    companion object {
+        const val DEFAULT_MAX_AGE_MILLIS = 3_000L
     }
 }

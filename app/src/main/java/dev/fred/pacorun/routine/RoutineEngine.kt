@@ -21,6 +21,7 @@ class RoutineEngine(private val preferences: RunPreferences) {
         val distanceDelta = input.reliableDistanceDeltaMeters.takeIf {
             input.gpsReliable && it.isFinite() && it > 0.0
         } ?: 0.0
+        val totalDistanceBeforeInput = totalDistanceMeters
         totalDistanceMeters += distanceDelta
         if (phase == RoutinePhase.RUN || phase == RoutinePhase.WALK) routineDistanceMeters += distanceDelta
 
@@ -32,20 +33,21 @@ class RoutineEngine(private val preferences: RunPreferences) {
             initialized = true
             if (preferences.initialConstantKm == 0f) {
                 startRun(input.elapsedRealtimeMillis, reliableSpeed(input), cues)
+                routineDistanceMeters += distanceDelta
                 profileChanged = true
             }
         }
 
         if (phase == RoutinePhase.CONSTANT_BEFORE && totalDistanceMeters >= kmToMeters(preferences.initialConstantKm)) {
             startRun(input.elapsedRealtimeMillis, reliableSpeed(input), cues)
+            routineDistanceMeters += (totalDistanceMeters - maxOf(totalDistanceBeforeInput, kmToMeters(preferences.initialConstantKm)))
+                .coerceAtLeast(0.0)
             profileChanged = true
         }
 
         if (phase == RoutinePhase.RUN || phase == RoutinePhase.WALK) {
             if (!preferences.routineUnlimited && routineDistanceMeters >= kmToMeters(preferences.routineKm)) {
-                phase = RoutinePhase.CONSTANT_AFTER
-                cues += RoutineCue.ROUTINE_END
-                directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
+                finishRoutine(reliableSpeed(input), cues)
                 profileChanged = true
             } else {
                 val transitions = advanceTo(input.elapsedRealtimeMillis)
@@ -69,6 +71,13 @@ class RoutineEngine(private val preferences: RunPreferences) {
         intervalStartedAtMillis = now
         resetIntervalCues()
         cues += phaseCue()
+        directionCue(speed, activeRange())?.let(cues::add)
+    }
+
+    private fun finishRoutine(speed: Float?, cues: MutableList<RoutineCue>) {
+        phase = RoutinePhase.CONSTANT_AFTER
+        cues.clear()
+        cues += RoutineCue.ROUTINE_END
         directionCue(speed, activeRange())?.let(cues::add)
     }
 

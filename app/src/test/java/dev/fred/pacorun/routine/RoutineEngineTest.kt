@@ -50,6 +50,32 @@ class RoutineEngineTest {
     }
 
     @Test
+    fun warmupCrossingCreditsOnlyPostBoundaryDistanceToRoutine() {
+        val engine = RoutineEngine(preferences(warmupKm = .001f, unlimited = false, routineKm = .01f))
+
+        engine.accept(input(time = 0L, distance = .75))
+        val result = engine.accept(input(time = 1_000L, distance = .5))
+
+        assertEquals(RoutinePhase.RUN, result.phase)
+        assertEquals(1.25, result.totalDistanceMeters, .001)
+        assertEquals(.25, result.routineDistanceMeters, .001)
+        assertEquals(listOf(RoutineCue.ROUTINE_START), result.cues)
+    }
+
+    @Test
+    fun warmupCrossingThatAlsoEndsLimitedRoutineEmitsOnlyRoutineEndThenDirection() {
+        val engine = RoutineEngine(preferences(warmupKm = .001f, unlimited = false, routineKm = .0005f))
+
+        val result = engine.accept(input(time = 0L, distance = 1.5, speed = 6f))
+
+        assertEquals(RoutinePhase.CONSTANT_AFTER, result.phase)
+        assertEquals(1.5, result.totalDistanceMeters, .001)
+        assertEquals(.5, result.routineDistanceMeters, .001)
+        assertEquals(listOf(RoutineCue.ROUTINE_END, RoutineCue.SPEED_UP), result.cues)
+        assertTrue(result.profileChanged)
+    }
+
+    @Test
     fun runAndWalkAlternateAtIndependentDurations() {
         val engine = RoutineEngine(preferences(runSeconds = 5, walkSeconds = 7))
 

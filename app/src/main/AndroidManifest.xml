@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:allowBackup="true"
@@ -25,7 +26,7 @@
         <service
             android:name=".service.RunSessionService"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="location|mediaPlayback" />
     </application>
 
 </manifest>
