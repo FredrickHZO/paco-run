@@ -101,6 +101,15 @@ class RoutineEngineTest {
     }
 
     @Test
+    fun delayedSampleDoesNotEmitStaleTenSecondWarning() {
+        val engine = RoutineEngine(preferences(runSeconds = 15))
+
+        engine.accept(input(time = 0L))
+
+        assertEquals(emptyList<RoutineCue>(), engine.accept(input(time = 11_000L)).cues)
+    }
+
+    @Test
     fun shortIntervalsOmitTenSecondWarning() {
         val engine = RoutineEngine(preferences(runSeconds = 10))
 

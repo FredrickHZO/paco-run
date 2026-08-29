@@ -116,7 +116,14 @@ class RoutineEngine(private val preferences: RunPreferences) {
                 return@buildList
             }
             val warningAt = durationMillis() - 10_000L
-            if (durationMillis() > 10_000L && previousElapsed < warningAt && elapsed >= warningAt && !warningEmitted) {
+            val remaining = durationMillis() - elapsed
+            if (
+                durationMillis() > 10_000L &&
+                    previousElapsed < warningAt &&
+                    elapsed >= warningAt &&
+                    remaining in 9_001L..10_000L &&
+                    !warningEmitted
+            ) {
                 warningEmitted = true
                 add(if (phase == RoutinePhase.RUN) RoutineCue.WALK_IN_TEN else RoutineCue.RUN_IN_TEN)
             }
