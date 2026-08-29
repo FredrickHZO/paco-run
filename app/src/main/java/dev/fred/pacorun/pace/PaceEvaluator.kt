@@ -11,6 +11,7 @@ class PaceEvaluator(private val config: PaceConfig) {
     private var candidateSamples = 0
     private var gpsWeak = false
     private var lastPaceCueMillis: Long? = null
+    private val pendingPaceCues = ArrayDeque<Cue>()
 
     fun accept(sample: LocationSample): PaceResult {
         if (!sample.reliable) return acceptUnreliable()
@@ -21,8 +22,12 @@ class PaceEvaluator(private val config: PaceConfig) {
         val pace = sample.paceState()
         if (pace == confirmedPace) {
             clearCandidate()
-            val paceCue = if (gpsCue == null) repeatedCue(pace, sample.elapsedRealtimeMillis) else null
-            return update(confirmedPace ?: PaceState.ACQUIRING_GPS, sample.speedKmh, gpsCue ?: paceCue)
+            val paceCue = repeatedCue(pace, sample.elapsedRealtimeMillis)
+            return update(
+                confirmedPace ?: PaceState.ACQUIRING_GPS,
+                sample.speedKmh,
+                selectCue(gpsCue, paceCue, sample.elapsedRealtimeMillis),
+            )
         }
 
         if (pace == candidatePace) {
@@ -33,7 +38,11 @@ class PaceEvaluator(private val config: PaceConfig) {
         }
 
         if (candidateSamples < config.confirmationSamples) {
-            return update(confirmedPace ?: PaceState.ACQUIRING_GPS, sample.speedKmh, gpsCue)
+            return update(
+                confirmedPace ?: PaceState.ACQUIRING_GPS,
+                sample.speedKmh,
+                selectCue(gpsCue, null, sample.elapsedRealtimeMillis),
+            )
         }
 
         val previous = confirmedPace
@@ -49,12 +58,8 @@ class PaceEvaluator(private val config: PaceConfig) {
             }
             else -> null
         }
-        lastPaceCueMillis = if (pace == PaceState.TOO_SLOW || pace == PaceState.TOO_FAST) {
-            sample.elapsedRealtimeMillis
-        } else {
-            null
-        }
-        return update(pace, sample.speedKmh, gpsCue ?: paceCue)
+        lastPaceCueMillis = null
+        return update(pace, sample.speedKmh, selectCue(gpsCue, paceCue, sample.elapsedRealtimeMillis))
     }
 
     private fun acceptUnreliable(): PaceResult {
@@ -65,13 +70,22 @@ class PaceEvaluator(private val config: PaceConfig) {
     }
 
     private fun repeatedCue(pace: PaceState, elapsedMillis: Long): Cue? {
-        val lastCue = lastPaceCueMillis ?: return null
-        if (elapsedMillis < lastCue || elapsedMillis - lastCue < config.repeatMillis) return null
-        lastPaceCueMillis = elapsedMillis
-        return when (pace) {
+        val cue = when (pace) {
             PaceState.TOO_SLOW -> Cue.TOO_SLOW
             PaceState.TOO_FAST -> Cue.TOO_FAST
-            else -> null
+            else -> return null
+        }
+        if (cue in pendingPaceCues) return null
+        val lastCue = lastPaceCueMillis ?: return null
+        if (elapsedMillis < lastCue || elapsedMillis - lastCue < config.repeatMillis) return null
+        return cue
+    }
+
+    private fun selectCue(gpsCue: Cue?, paceCue: Cue?, elapsedMillis: Long): Cue? {
+        if (paceCue != null) pendingPaceCues.addLast(paceCue)
+        if (gpsCue != null) return gpsCue
+        return pendingPaceCues.removeFirstOrNull()?.also {
+            if (it == Cue.TOO_SLOW || it == Cue.TOO_FAST) lastPaceCueMillis = elapsedMillis
         }
     }
 

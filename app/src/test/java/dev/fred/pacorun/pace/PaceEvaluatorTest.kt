@@ -124,6 +124,32 @@ class PaceEvaluatorTest {
     }
 
     @Test
+    fun immediateFastEntryAfterGpsRecoveryEmitsBothCuesAndTimesRepeatFromDelivery() {
+        val evaluator = PaceEvaluator(config.copy(confirmationSamples = 1))
+        evaluator.accept(unreliable(0L))
+
+        val recovered = evaluator.accept(sample(8.8f, 1_000L))
+        assertEquals(PaceState.TOO_FAST, recovered.state)
+        assertEquals(Cue.GOOD_GPS, recovered.cue)
+        assertEquals(Cue.TOO_FAST, evaluator.accept(sample(8.8f, 1_001L)).cue)
+        assertNull(evaluator.accept(sample(8.8f, 6_000L)).cue)
+        assertEquals(Cue.TOO_FAST, evaluator.accept(sample(8.8f, 6_001L)).cue)
+    }
+
+    @Test
+    fun immediateGoodReturnAfterGpsRecoveryEmitsBothCuesOnce() {
+        val evaluator = PaceEvaluator(config.copy(confirmationSamples = 1))
+        evaluator.accept(sample(8.8f, 0L))
+        evaluator.accept(unreliable(1_000L))
+
+        val recovered = evaluator.accept(sample(8f, 2_000L))
+        assertEquals(PaceState.GOOD, recovered.state)
+        assertEquals(Cue.GOOD_GPS, recovered.cue)
+        assertEquals(Cue.GOOD_PACE, evaluator.accept(sample(8f, 2_001L)).cue)
+        assertNull(evaluator.accept(sample(8f, 2_002L)).cue)
+    }
+
+    @Test
     fun aNewWeakGpsEpisodeCuesAgain() {
         val evaluator = PaceEvaluator(config)
         evaluator.accept(unreliable(0L))
