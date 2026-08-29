@@ -80,6 +80,18 @@ class RoutineEngineTest {
     }
 
     @Test
+    fun warningsAndBeepsFireWhenJitteredSamplesCrossTheirThresholds() {
+        val engine = RoutineEngine(preferences(runSeconds = 15))
+
+        engine.accept(input(time = 0L))
+        assertEquals(emptyList<RoutineCue>(), engine.accept(input(time = 4_900L)).cues)
+        assertEquals(listOf(RoutineCue.WALK_IN_TEN), engine.accept(input(time = 5_100L)).cues)
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 12_100L)).cues)
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 13_100L)).cues)
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 14_100L)).cues)
+    }
+
+    @Test
     fun shortIntervalsOmitTenSecondWarning() {
         val engine = RoutineEngine(preferences(runSeconds = 10))
 
@@ -88,6 +100,19 @@ class RoutineEngineTest {
         assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 7_000L)).cues)
         assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 8_000L)).cues)
         assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 9_000L)).cues)
+    }
+
+    @Test
+    fun enteringThreeSecondIntervalCuesItsFirstBeepAfterThePhaseCue() {
+        val engine = RoutineEngine(preferences(runSeconds = 20, walkSeconds = 3))
+
+        engine.accept(input(time = 0L))
+        assertEquals(
+            listOf(RoutineCue.WALK_ROUTINE, RoutineCue.COUNTDOWN_BEEP),
+            engine.accept(input(time = 20_000L)).cues,
+        )
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 21_000L)).cues)
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 22_000L)).cues)
     }
 
     @Test

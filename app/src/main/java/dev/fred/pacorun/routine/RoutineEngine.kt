@@ -14,6 +14,7 @@ class RoutineEngine(private val preferences: RunPreferences) {
     private var totalDistanceMeters = 0.0
     private var routineDistanceMeters = 0.0
     private var lastElapsedRealtimeMillis = 0L
+    private var lastTimingCheckMillis = 0L
 
     fun accept(input: RoutineInput): RoutineResult {
         lastElapsedRealtimeMillis = input.elapsedRealtimeMillis
@@ -46,12 +47,17 @@ class RoutineEngine(private val preferences: RunPreferences) {
                 cues += RoutineCue.ROUTINE_END
                 directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
                 profileChanged = true
-            } else if (advanceTo(input.elapsedRealtimeMillis)) {
-                cues += phaseCue()
-                directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
-                profileChanged = true
             } else {
-                cues += timingCues(input.elapsedRealtimeMillis)
+                val transitions = advanceTo(input.elapsedRealtimeMillis)
+                if (transitions > 0) {
+                    cues += phaseCue()
+                    directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
+                    profileChanged = true
+                    if (transitions == 1 && durationMillis() <= 3_000L) cues += timingCues(input.elapsedRealtimeMillis)
+                    else lastTimingCheckMillis = input.elapsedRealtimeMillis
+                } else {
+                    cues += timingCues(input.elapsedRealtimeMillis)
+                }
             }
         }
 
@@ -66,9 +72,9 @@ class RoutineEngine(private val preferences: RunPreferences) {
         directionCue(speed, activeRange())?.let(cues::add)
     }
 
-    private fun advanceTo(now: Long): Boolean {
+    private fun advanceTo(now: Long): Int {
         val elapsed = now - intervalStartedAtMillis
-        if (elapsed < durationMillis()) return false
+        if (elapsed < durationMillis()) return 0
 
         var remaining = elapsed - durationMillis()
         intervalStartedAtMillis += durationMillis()
@@ -80,28 +86,36 @@ class RoutineEngine(private val preferences: RunPreferences) {
         intervalStartedAtMillis += fullCycles * cycleMillis
         remaining -= fullCycles * cycleMillis
 
+        var transitions = if (fullCycles > 0L) 2 else 1
         if (phase == RoutinePhase.RUN && remaining >= runMillis) {
             phase = RoutinePhase.WALK
             intervalStartedAtMillis += runMillis
+            transitions = 2
         } else if (phase == RoutinePhase.WALK && remaining >= walkMillis) {
             phase = RoutinePhase.RUN
             intervalStartedAtMillis += walkMillis
+            transitions = 2
         }
         resetIntervalCues()
-        return true
+        return transitions
     }
 
     private fun timingCues(now: Long): List<RoutineCue> {
-        val remaining = durationMillis() - (now - intervalStartedAtMillis)
-        if (remaining <= 0L) return emptyList()
+        val previousElapsed = lastTimingCheckMillis - intervalStartedAtMillis
+        val elapsed = now - intervalStartedAtMillis
+        lastTimingCheckMillis = now
+        if (elapsed !in 0 until durationMillis()) return emptyList()
         return buildList {
-            if (durationMillis() > 10_000L && remaining == 10_000L && !warningEmitted) {
+            val warningAt = durationMillis() - 10_000L
+            if (durationMillis() > 10_000L && previousElapsed < warningAt && elapsed >= warningAt && !warningEmitted) {
                 warningEmitted = true
                 add(if (phase == RoutinePhase.RUN) RoutineCue.WALK_IN_TEN else RoutineCue.RUN_IN_TEN)
             }
-            val remainingSeconds = (remaining / 1_000L).toInt()
-            if (remaining % 1_000L == 0L && remainingSeconds in 1..3 && countdownSecondsEmitted.add(remainingSeconds)) {
-                add(RoutineCue.COUNTDOWN_BEEP)
+            for (seconds in 3 downTo 1) {
+                val beepAt = durationMillis() - seconds * 1_000L
+                if (beepAt >= 0L && previousElapsed < beepAt && elapsed >= beepAt && countdownSecondsEmitted.add(seconds)) {
+                    add(RoutineCue.COUNTDOWN_BEEP)
+                }
             }
         }
     }
@@ -138,6 +152,7 @@ class RoutineEngine(private val preferences: RunPreferences) {
     private fun resetIntervalCues() {
         warningEmitted = false
         countdownSecondsEmitted.clear()
+        lastTimingCheckMillis = intervalStartedAtMillis - 1L
     }
 
     private fun kmToMeters(km: Float) = km.toString().toDouble() * 1_000.0
