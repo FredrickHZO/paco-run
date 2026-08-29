@@ -135,6 +135,8 @@ class SessionCoordinator(
     }
 
     private var latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
+    private var latestReliableSample: LocationSample? = null
+    private var outageActive = false
 
     private fun process(
         elapsedRealtimeMillis: Long,
@@ -142,12 +144,26 @@ class SessionCoordinator(
         position: LocationPosition?,
         signalGpsOutage: Boolean,
     ) {
-        val paceSample = sample ?: LocationSample(0f, null, false, elapsedRealtimeMillis)
-        val gpsReliable = paceSample.reliable && position != null
-        val distanceDelta = if (gpsReliable) {
-            distanceAccumulator.accept(requireNotNull(position), reliable = true)
-        } else if (sample != null) {
+        val wasOutage = outageActive
+        val actualReliable = sample?.reliable == true && position != null
+        val timerRetainsFreshGps = sample == null && !signalGpsOutage && latestReliableSample != null
+        val gpsReliable = actualReliable || timerRetainsFreshGps
+        val paceSample = when {
+            actualReliable -> requireNotNull(sample)
+            timerRetainsFreshGps -> requireNotNull(latestReliableSample)
+            else -> sample ?: LocationSample(0f, null, false, elapsedRealtimeMillis)
+        }
+        val enteredOutage = !gpsReliable && !outageActive && (sample != null || signalGpsOutage)
+        if (actualReliable) {
+            latestReliableSample = paceSample
+            outageActive = false
+        } else if (enteredOutage) {
+            latestReliableSample = null
+            outageActive = true
             distanceAccumulator.breakChain()
+        }
+        val distanceDelta = if (actualReliable) {
+            distanceAccumulator.accept(requireNotNull(position), reliable = true)
         } else {
             0.0
         }
@@ -171,9 +187,12 @@ class SessionCoordinator(
             )
             latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         }
+        if (routine.profileChanged && wasOutage) {
+            latestPace = paceEvaluator.accept(LocationSample(0f, null, false, elapsedRealtimeMillis)).copy(cue = null)
+        }
         val pace = when {
             sample != null -> paceEvaluator.accept(paceSample)
-            signalGpsOutage -> paceEvaluator.accept(paceSample)
+            signalGpsOutage && enteredOutage -> paceEvaluator.accept(paceSample)
             else -> latestPace
         }
         latestPace = pace

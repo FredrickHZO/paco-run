@@ -10,6 +10,7 @@ import dev.fred.pacorun.routine.RoutineCue
 import dev.fred.pacorun.routine.RoutineInput
 import dev.fred.pacorun.routine.RoutinePhase
 import dev.fred.pacorun.routine.RoutineResult
+import dev.fred.pacorun.settings.RoutineMode
 import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.settings.SpeedRange
 import org.junit.Assert.assertEquals
@@ -144,6 +145,78 @@ class SessionCoordinatorTest {
 
         assertEquals(listOf(AudioCue.BAD_GPS, AudioCue.GOOD_GPS, AudioCue.TOO_FAST), cues.filter {
             it == AudioCue.BAD_GPS || it == AudioCue.GOOD_GPS || it == AudioCue.TOO_FAST
+        })
+    }
+
+    @Test
+    fun firstTimerOutageBreaksAnchorSoRecoveryDoesNotBridgeDistance() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(4_000L, signalGpsOutage = true)
+        coordinator.tick(5_000L, reliableSample(8f, 5_000L), LocationPosition(0.0, .00001, 5_000L))
+
+        assertEquals(0.0, routine.lastInput.reliableDistanceDeltaMeters, .001)
+    }
+
+    @Test
+    fun healthyTimerRetainsReliableSpeedForStateAndPhaseDirectionCue() {
+        val cues = mutableListOf<AudioCue>()
+        val published = mutableListOf<RunSessionState>()
+        val preferences = RunPreferences(
+            mode = RoutineMode.WALK_RUN,
+            constantRange = SpeedRange(7f, 8f),
+            runRange = SpeedRange(9f, 10f),
+            walkUsesConstantRange = false,
+            walkRange = SpeedRange(4f, 5f),
+            runSeconds = 1,
+            walkSeconds = 60,
+        )
+        val coordinator = SessionCoordinator(
+            preferences = preferences,
+            routineEngine = RoutineEngineAdapter(dev.fred.pacorun.routine.RoutineEngine(preferences)),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 11f, null)),
+            onCues = { values, _ -> cues += values },
+            publish = published::add,
+        )
+
+        coordinator.tick(0L, reliableSample(11f, 0L), LocationPosition(0.0, 0.0, 0L))
+        cues.clear()
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false)
+
+        assertEquals(listOf(AudioCue.WALK_ROUTINE, AudioCue.SLOW_DOWN), cues)
+        val state = published.last() as RunSessionState.Running
+        assertTrue(state.gpsReliable)
+        assertEquals(11f, state.speedKmh)
+    }
+
+    @Test
+    fun profileChangesDuringOneOutageEmitOneBadGpsThenOneGoodGpsOnRecovery() {
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(gpsCuesEnabled = true),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = true),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, true)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+        )
+
+        coordinator.advanceTimer(0L, signalGpsOutage = true)
+        coordinator.advanceTimer(1_000L, signalGpsOutage = true)
+        coordinator.advanceTimer(2_000L, signalGpsOutage = true)
+        coordinator.tick(3_000L, reliableSample(8f, 3_000L), LocationPosition(0.0, 0.0, 3_000L))
+
+        assertEquals(listOf(AudioCue.BAD_GPS, AudioCue.GOOD_GPS), cues.filter {
+            it == AudioCue.BAD_GPS || it == AudioCue.GOOD_GPS
         })
     }
 
