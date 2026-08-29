@@ -66,7 +66,6 @@ class CuePlayer(context: Context) {
     private val queue = AudioCueQueue()
     private val resourcePackage = context.packageName
     private val player = ExoPlayer.Builder(context)
-        .setLooper(Looper.getMainLooper())
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)

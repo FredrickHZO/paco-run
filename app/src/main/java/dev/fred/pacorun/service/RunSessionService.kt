@@ -126,7 +126,16 @@ class RunSessionService : Service() {
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
         lastLocationCallbackElapsedMillis = null
-        fusedLocationClient.requestLocationUpdates(locationRequest(), locationCallback, Looper.getMainLooper())
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            stopSession()
+            return
+        }
+        try {
+            fusedLocationClient.requestLocationUpdates(locationRequest(), locationCallback, Looper.getMainLooper())
+        } catch (_: SecurityException) {
+            stopSession()
+            return
+        }
         locationRequested = true
         handler.post(ticker)
         starting = false
