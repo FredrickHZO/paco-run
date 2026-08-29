@@ -2,6 +2,8 @@ package dev.fred.pacorun.audio
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.RawRes
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -55,9 +57,16 @@ class AudioCueQueue {
 }
 
 class CuePlayer(context: Context) {
+    init {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "CuePlayer must be created on the main thread"
+        }
+    }
+
     private val queue = AudioCueQueue()
     private val resourcePackage = context.packageName
     private val player = ExoPlayer.Builder(context)
+        .setLooper(Looper.getMainLooper())
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -66,6 +75,7 @@ class CuePlayer(context: Context) {
             true,
         )
         .build()
+    private val playerHandler = Handler(player.applicationLooper)
     private var playing = false
     private var closed = false
 
@@ -78,16 +88,28 @@ class CuePlayer(context: Context) {
     }
 
     fun enqueue(cues: List<AudioCue>, volume: Float) {
-        if (closed || cues.isEmpty()) return
+        if (cues.isEmpty()) return
+        val cuesToEnqueue = cues.toList()
+        onPlayerLooper { enqueueInternal(cuesToEnqueue, volume) }
+    }
+
+    fun close() = onPlayerLooper(::closeInternal)
+
+    private fun enqueueInternal(cues: List<AudioCue>, volume: Float) {
+        if (closed) return
         queue.enqueue(cues, volume)
         if (!playing) playNext()
     }
 
-    fun close() {
+    private fun closeInternal() {
         if (closed) return
         closed = true
         queue.clear()
         player.release()
+    }
+
+    private fun onPlayerLooper(action: () -> Unit) {
+        if (Looper.myLooper() == player.applicationLooper) action() else playerHandler.post(action)
     }
 
     private fun playNext() {
