@@ -27,11 +27,13 @@ data class RunPreferences(
     val isValid: Boolean
         get() {
             if (!constantRange.isValid) return false
+            if (!cueVolume.isFinite() || cueVolume !in 0f..1f) return false
             if (mode != RoutineMode.WALK_RUN) return true
 
             val effectiveWalkRange = if (walkUsesConstantRange) constantRange else walkRange
             return runRange.isValid &&
                 effectiveWalkRange.isValid &&
+                initialConstantKm.isFinite() &&
                 initialConstantKm >= 0f &&
                 runSeconds > 0 &&
                 walkSeconds > 0 &&

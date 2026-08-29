@@ -35,4 +35,23 @@ class RunPreferencesTest {
         assertFalse(RunPreferences(constantRange = SpeedRange(7f, Float.POSITIVE_INFINITY)).isValid)
         assertTrue(RunPreferences(constantRange = SpeedRange(7f, 8f)).isValid)
     }
+
+    @Test
+    fun walkRunInitialDistanceMustBeFiniteAndNonNegative() {
+        val base = RunPreferences(mode = RoutineMode.WALK_RUN)
+        assertFalse(base.copy(initialConstantKm = Float.NaN).isValid)
+        assertFalse(base.copy(initialConstantKm = Float.POSITIVE_INFINITY).isValid)
+        assertFalse(base.copy(initialConstantKm = Float.NEGATIVE_INFINITY).isValid)
+        assertFalse(base.copy(initialConstantKm = -0.1f).isValid)
+    }
+
+    @Test
+    fun cueVolumeMustBeFiniteAndWithinRange() {
+        assertFalse(RunPreferences(cueVolume = Float.NaN).isValid)
+        assertFalse(RunPreferences(cueVolume = Float.POSITIVE_INFINITY).isValid)
+        assertFalse(RunPreferences(cueVolume = -0.1f).isValid)
+        assertFalse(RunPreferences(cueVolume = 1.1f).isValid)
+        assertTrue(RunPreferences(cueVolume = 0f).isValid)
+        assertTrue(RunPreferences(cueVolume = 1f).isValid)
+    }
 }
