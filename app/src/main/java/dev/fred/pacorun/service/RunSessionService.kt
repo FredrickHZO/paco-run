@@ -46,17 +46,20 @@ class RunSessionService : Service() {
     private var locationRequested = false
     private var starting = false
     private var sessionToken = 0L
-    private var lastTickSecond = Long.MIN_VALUE
+    private var lastTimerSecond = Long.MIN_VALUE
+    private var lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
+    private var lastLocationCallbackElapsedMillis: Long? = null
+    private val notificationTracker = SessionNotificationTracker()
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            result.lastLocation?.let(::onLocation)
+            result.locations.forEach(::onLocation)
         }
     }
 
     private val ticker = object : Runnable {
         override fun run() {
-            tick(SystemClock.elapsedRealtime(), sample = null, position = null)
+            tickTimer(SystemClock.elapsedRealtime())
             handler.postDelayed(this, TICK_MILLIS)
         }
     }
@@ -85,14 +88,23 @@ class RunSessionService : Service() {
     }
 
     private fun startSession() {
+        if (!SessionStartPrerequisites(
+                hasFineLocation = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
+            ).canStartLocationForegroundService
+        ) {
+            stopSession()
+            return
+        }
         starting = true
         val token = ++sessionToken
-        RunSessionStore.publish(RunSessionState.AcquiringGps)
-        startForeground(NOTIFICATION_ID, notification("Acquisizione GPS"))
+        val acquiringGps = RunSessionState.AcquiringGps
+        RunSessionStore.publish(acquiringGps)
+        startForeground(NOTIFICATION_ID, notification(notificationTracker.textFor(acquiringGps)))
+        notificationTracker.markDisplayed(acquiringGps)
         scope.launch {
             val preferences = RunPreferencesStore(this@RunSessionService).preferences.first()
             if (token != sessionToken) return@launch
-            if (!preferences.isValid || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            if (!preferences.isValid) {
                 stopSession()
                 return@launch
             }
@@ -111,7 +123,9 @@ class RunSessionService : Service() {
             publish = ::publish,
             startedAtElapsedMillis = startedAt,
         )
-        lastTickSecond = Long.MIN_VALUE
+        lastTimerSecond = Long.MIN_VALUE
+        lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
+        lastLocationCallbackElapsedMillis = null
         fusedLocationClient.requestLocationUpdates(locationRequest(), locationCallback, Looper.getMainLooper())
         locationRequested = true
         handler.post(ticker)
@@ -119,9 +133,12 @@ class RunSessionService : Service() {
     }
 
     private fun onLocation(location: Location) {
+        if (location.elapsedRealtimeNanos <= lastLocationElapsedRealtimeNanos) return
+        lastLocationElapsedRealtimeNanos = location.elapsedRealtimeNanos
         val now = SystemClock.elapsedRealtime()
+        lastLocationCallbackElapsedMillis = now
         val sample = LocationSampleMapper().map(location, now)
-        tick(
+        coordinator?.tick(
             elapsedRealtimeMillis = now,
             sample = sample,
             position = LocationPosition(
@@ -132,21 +149,21 @@ class RunSessionService : Service() {
         )
     }
 
-    private fun tick(elapsedRealtimeMillis: Long, sample: dev.fred.pacorun.location.LocationSample?, position: LocationPosition?) {
+    private fun tickTimer(elapsedRealtimeMillis: Long) {
         val second = elapsedRealtimeMillis / TICK_MILLIS
-        if (second == lastTickSecond) return
-        lastTickSecond = second
-        coordinator?.tick(elapsedRealtimeMillis, sample, position)
+        if (second == lastTimerSecond) return
+        lastTimerSecond = second
+        val gpsOutage = lastLocationCallbackElapsedMillis?.let {
+            elapsedRealtimeMillis - it > GPS_WEAK_TIMEOUT_MILLIS
+        } ?: true
+        coordinator?.advanceTimer(elapsedRealtimeMillis, signalGpsOutage = gpsOutage)
     }
 
     private fun publish(state: RunSessionState) {
         RunSessionStore.publish(state)
-        val text = when (state) {
-            RunSessionState.Idle -> "Sessione terminata"
-            RunSessionState.AcquiringGps -> "Acquisizione GPS"
-            is RunSessionState.Running -> state.phase.name.replace('_', ' ')
+        if (notificationTracker.shouldUpdate(state)) {
+            notificationManager.notify(NOTIFICATION_ID, notification(notificationTracker.textFor(state)))
         }
-        notificationManager.notify(NOTIFICATION_ID, notification(text))
     }
 
     private fun stopSession() {
@@ -206,5 +223,6 @@ class RunSessionService : Service() {
         private const val CHANNEL_ID = "run_session"
         private const val NOTIFICATION_ID = 1
         private const val TICK_MILLIS = 1_000L
+        private const val GPS_WEAK_TIMEOUT_MILLIS = 3_000L
     }
 }

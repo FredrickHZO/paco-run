@@ -55,10 +55,10 @@ class SessionCoordinatorTest {
     }
 
     @Test
-    fun weakGpsStillAdvancesRoutineButDoesNotEvaluatePaceOrDistance() {
+    fun weakGpsStillAdvancesRoutineAndIsPassedToPaceWithoutDistance() {
         val events = mutableListOf<String>()
         val routine = FakeRoutineEngine(events, profileChanged = false)
-        val pace = FakePaceEvaluator(events, PaceResult(PaceState.GOOD, 8f, Cue.GOOD_PACE))
+        val pace = FakePaceEvaluator(events, PaceResult(PaceState.GPS_WEAK, null, Cue.BAD_GPS))
         val published = mutableListOf<RunSessionState>()
         val coordinator = SessionCoordinator(
             preferences = RunPreferences(),
@@ -70,12 +70,81 @@ class SessionCoordinatorTest {
 
         coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .00001, 1_000L))
 
-        assertEquals(listOf("routine", "cues:ROUTINE_START"), events)
+        assertEquals(listOf("routine", "pace", "cues:ROUTINE_START, BAD_GPS"), events)
         assertFalse(routine.lastInput.gpsReliable)
         assertEquals(0.0, routine.lastInput.reliableDistanceDeltaMeters, .001)
+        assertFalse(pace.samples.single().reliable)
         val state = published.single() as RunSessionState.Running
         assertFalse(state.gpsReliable)
         assertEquals(null, state.speedKmh)
+    }
+
+    @Test
+    fun timerBeforeEveryLocationKeepsAnchorAndProcessesEachLocationOnce() {
+        val events = mutableListOf<String>()
+        val routine = FakeRoutineEngine(events, profileChanged = false)
+        val pace = FakePaceEvaluator(events, PaceResult(PaceState.GOOD, 8f, null))
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+        )
+
+        coordinator.tick(0L, sample = null, position = null)
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, sample = null, position = null)
+        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .00001, 1_000L))
+
+        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(4, routine.inputs.size)
+        assertEquals(2, pace.samples.size)
+        assertTrue(pace.samples[0].reliable)
+        assertTrue(pace.samples[1].reliable)
+    }
+
+    @Test
+    fun timerBeforeEveryLocationDoesNotBreakPaceConfirmation() {
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(confirmationSamples = 2),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, false)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, sample = null, position = null)
+        coordinator.tick(1_000L, reliableSample(9f, 1_000L), LocationPosition(0.0, .00001, 1_000L))
+
+        assertTrue(AudioCue.TOO_FAST in cues)
+    }
+
+    @Test
+    fun weakGpsCueAndRecoveryClearPaceCandidates() {
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(confirmationSamples = 2, gpsCuesEnabled = true),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, true)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .00001, 1_000L))
+        coordinator.tick(2_000L, reliableSample(9f, 2_000L), LocationPosition(0.0, .00002, 2_000L))
+        coordinator.tick(3_000L, reliableSample(9f, 3_000L), LocationPosition(0.0, .00003, 3_000L))
+
+        assertEquals(listOf(AudioCue.BAD_GPS, AudioCue.GOOD_GPS, AudioCue.TOO_FAST), cues.filter {
+            it == AudioCue.BAD_GPS || it == AudioCue.GOOD_GPS || it == AudioCue.TOO_FAST
+        })
     }
 
     private fun reliableSample(speedKmh: Float, time: Long) = LocationSample(speedKmh, .2f, true, time)
@@ -86,10 +155,12 @@ class SessionCoordinatorTest {
         private val profileChanged: Boolean,
     ) : SessionRoutineEngine {
         lateinit var lastInput: RoutineInput
+        val inputs = mutableListOf<RoutineInput>()
 
         override fun accept(input: RoutineInput): RoutineResult {
             events += "routine"
             lastInput = input
+            inputs += input
             return RoutineResult(
                 phase = RoutinePhase.RUN,
                 activeRange = SpeedRange(7f, 8f),
@@ -106,12 +177,14 @@ class SessionCoordinatorTest {
         private val events: MutableList<String>,
         private val result: PaceResult,
     ) : SessionPaceEvaluator {
+        val samples = mutableListOf<LocationSample>()
         override fun updateConfig(config: PaceConfig) {
             events += "reset"
         }
 
         override fun accept(sample: LocationSample): PaceResult {
             events += "pace"
+            samples += sample
             return result
         }
     }

@@ -45,6 +45,31 @@ object RunSessionStore {
     }
 }
 
+data class SessionStartPrerequisites(val hasFineLocation: Boolean) {
+    val canStartLocationForegroundService: Boolean get() = hasFineLocation
+}
+
+class SessionNotificationTracker {
+    private var displayedText: String? = null
+
+    fun textFor(state: RunSessionState): String = when (state) {
+        RunSessionState.Idle -> "Sessione terminata"
+        RunSessionState.AcquiringGps -> "Acquisizione GPS"
+        is RunSessionState.Running -> state.phase.name.replace('_', ' ')
+    }
+
+    fun markDisplayed(state: RunSessionState) {
+        displayedText = textFor(state)
+    }
+
+    fun shouldUpdate(state: RunSessionState): Boolean {
+        val nextText = textFor(state)
+        if (nextText == displayedText) return false
+        displayedText = nextText
+        return true
+    }
+}
+
 data class LocationPosition(
     val latitude: Double,
     val longitude: Double,
@@ -102,17 +127,35 @@ class SessionCoordinator(
     private val distanceAccumulator: DistanceAccumulator = DistanceAccumulator(),
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
-        val gpsReliable = sample?.reliable == true && position != null
+        process(elapsedRealtimeMillis, sample, position, signalGpsOutage = false)
+    }
+
+    fun advanceTimer(elapsedRealtimeMillis: Long, signalGpsOutage: Boolean) {
+        process(elapsedRealtimeMillis, sample = null, position = null, signalGpsOutage = signalGpsOutage)
+    }
+
+    private var latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
+
+    private fun process(
+        elapsedRealtimeMillis: Long,
+        sample: LocationSample?,
+        position: LocationPosition?,
+        signalGpsOutage: Boolean,
+    ) {
+        val paceSample = sample ?: LocationSample(0f, null, false, elapsedRealtimeMillis)
+        val gpsReliable = paceSample.reliable && position != null
         val distanceDelta = if (gpsReliable) {
             distanceAccumulator.accept(requireNotNull(position), reliable = true)
-        } else {
+        } else if (sample != null) {
             distanceAccumulator.breakChain()
+        } else {
+            0.0
         }
         val routine = routineEngine.accept(
             RoutineInput(
                 elapsedRealtimeMillis = elapsedRealtimeMillis,
                 reliableDistanceDeltaMeters = distanceDelta,
-                currentReliableSpeedKmh = sample?.speedKmh?.takeIf { gpsReliable },
+                currentReliableSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
                 gpsReliable = gpsReliable,
             ),
         )
@@ -126,19 +169,21 @@ class SessionCoordinator(
                     gpsCuesEnabled = preferences.gpsCuesEnabled,
                 ),
             )
+            latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         }
-        val pace = if (gpsReliable) {
-            paceEvaluator.accept(requireNotNull(sample))
-        } else {
-            PaceResult(PaceState.GPS_WEAK, null, null)
+        val pace = when {
+            sample != null -> paceEvaluator.accept(paceSample)
+            signalGpsOutage -> paceEvaluator.accept(paceSample)
+            else -> latestPace
         }
+        latestPace = pace
         val cues = routine.cues.map { AudioCue.valueOf(it.name) } + listOfNotNull(pace.cue?.let { AudioCue.valueOf(it.name) })
         if (cues.isNotEmpty()) onCues(cues, preferences.cueVolume)
         publish(
             RunSessionState.Running(
                 phase = routine.phase,
                 pace = pace,
-                speedKmh = sample?.speedKmh?.takeIf { gpsReliable },
+                speedKmh = paceSample.speedKmh.takeIf { gpsReliable },
                 gpsReliable = gpsReliable,
                 startedAtElapsedMillis = startedAtElapsedMillis,
                 elapsedMillis = (elapsedRealtimeMillis - startedAtElapsedMillis).coerceAtLeast(0L),
