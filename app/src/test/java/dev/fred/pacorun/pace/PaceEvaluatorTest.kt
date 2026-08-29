@@ -168,6 +168,30 @@ class PaceEvaluatorTest {
         assertNull(evaluator.accept(sample(8f, 1_000L)).cue)
     }
 
+    @Test
+    fun profileChangeDropsOldCandidatesRemindersAndQueuedCues() {
+        val evaluator = PaceEvaluator(PaceConfig(4f, 6f, 2, 5_000L, true))
+
+        evaluator.accept(sample(7f, 0L))
+        evaluator.updateConfig(PaceConfig(8f, 9f, 2, 5_000L, true))
+
+        assertEquals(PaceState.ACQUIRING_GPS, evaluator.current.state)
+        assertNull(evaluator.accept(sample(7f, 1_000L)).cue)
+        assertEquals(Cue.TOO_SLOW, evaluator.accept(sample(7f, 2_000L)).cue)
+    }
+
+    @Test
+    fun profileChangeDropsPaceCueQueuedBehindGpsRecovery() {
+        val evaluator = PaceEvaluator(PaceConfig(4f, 6f, 1, 5_000L, true))
+
+        evaluator.accept(unreliable(0L))
+        assertEquals(Cue.GOOD_GPS, evaluator.accept(sample(7f, 1_000L)).cue)
+
+        evaluator.updateConfig(PaceConfig(8f, 9f, 1, 5_000L, true))
+
+        assertNull(evaluator.accept(sample(8.5f, 2_000L)).cue)
+    }
+
     private fun evaluatorAlreadyFast() = PaceEvaluator(config).also {
         it.accept(sample(8.7f, 0L))
         it.accept(sample(8.8f, 1_000L))

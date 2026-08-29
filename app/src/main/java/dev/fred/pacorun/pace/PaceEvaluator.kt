@@ -2,7 +2,7 @@ package dev.fred.pacorun.pace
 
 import dev.fred.pacorun.location.LocationSample
 
-class PaceEvaluator(private val config: PaceConfig) {
+class PaceEvaluator(private var config: PaceConfig) {
     var current = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         private set
 
@@ -12,6 +12,16 @@ class PaceEvaluator(private val config: PaceConfig) {
     private var gpsWeak = false
     private var lastPaceCueMillis: Long? = null
     private val pendingPaceCues = ArrayDeque<Cue>()
+
+    fun updateConfig(config: PaceConfig) {
+        this.config = config
+        confirmedPace = null
+        clearCandidate()
+        gpsWeak = false
+        lastPaceCueMillis = null
+        pendingPaceCues.clear()
+        current = PaceResult(PaceState.ACQUIRING_GPS, null, null)
+    }
 
     fun accept(sample: LocationSample): PaceResult {
         if (!sample.reliable) return acceptUnreliable()
