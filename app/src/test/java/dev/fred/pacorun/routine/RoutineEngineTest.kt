@@ -92,6 +92,15 @@ class RoutineEngineTest {
     }
 
     @Test
+    fun delayedSampleEmitsOnlyItsCurrentFinalSecondBeep() {
+        val engine = RoutineEngine(preferences(runSeconds = 15))
+
+        engine.accept(input(time = 0L))
+
+        assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 14_100L)).cues)
+    }
+
+    @Test
     fun shortIntervalsOmitTenSecondWarning() {
         val engine = RoutineEngine(preferences(runSeconds = 10))
 
@@ -113,6 +122,18 @@ class RoutineEngineTest {
         )
         assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 21_000L)).cues)
         assertEquals(listOf(RoutineCue.COUNTDOWN_BEEP), engine.accept(input(time = 22_000L)).cues)
+    }
+
+    @Test
+    fun delayedEntryIntoThreeSecondIntervalEmitsOnlyItsCurrentBeep() {
+        val engine = RoutineEngine(preferences(runSeconds = 20, walkSeconds = 3))
+
+        engine.accept(input(time = 0L))
+
+        assertEquals(
+            listOf(RoutineCue.WALK_ROUTINE, RoutineCue.COUNTDOWN_BEEP),
+            engine.accept(input(time = 22_900L)).cues,
+        )
     }
 
     @Test

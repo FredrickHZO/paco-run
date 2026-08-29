@@ -106,16 +106,19 @@ class RoutineEngine(private val preferences: RunPreferences) {
         lastTimingCheckMillis = now
         if (elapsed !in 0 until durationMillis()) return emptyList()
         return buildList {
+            val currentBeep = (1..3).firstOrNull { seconds ->
+                val beepAt = durationMillis() - seconds * 1_000L
+                beepAt >= 0L && previousElapsed < beepAt && elapsed >= beepAt && seconds !in countdownSecondsEmitted
+            }
+            if (currentBeep != null) {
+                countdownSecondsEmitted += currentBeep
+                add(RoutineCue.COUNTDOWN_BEEP)
+                return@buildList
+            }
             val warningAt = durationMillis() - 10_000L
             if (durationMillis() > 10_000L && previousElapsed < warningAt && elapsed >= warningAt && !warningEmitted) {
                 warningEmitted = true
                 add(if (phase == RoutinePhase.RUN) RoutineCue.WALK_IN_TEN else RoutineCue.RUN_IN_TEN)
-            }
-            for (seconds in 3 downTo 1) {
-                val beepAt = durationMillis() - seconds * 1_000L
-                if (beepAt >= 0L && previousElapsed < beepAt && elapsed >= beepAt && countdownSecondsEmitted.add(seconds)) {
-                    add(RoutineCue.COUNTDOWN_BEEP)
-                }
             }
         }
     }
