@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -67,6 +66,7 @@ object UiTags {
     const val confirmationSamples = "confirmation-samples"
     const val dynamicColor = "dynamic-color"
     const val start = "start"
+    const val editRoutine = "edit-routine"
     const val activePhase = "active-phase"
     const val activeSpeed = "active-speed"
     const val activeRemaining = "active-remaining"
@@ -80,8 +80,6 @@ object UiTags {
 fun SetupScreen(
     preferences: RunPreferences,
     onPreferencesChange: (RunPreferences) -> Unit,
-    onStart: () -> Unit,
-    permissionMessage: String? = null,
 ) {
     var volumeInputValid by remember(preferences.cueVolume) {
         mutableStateOf(preferences.cueVolume.isFinite() && preferences.cueVolume in 0f..1f)
@@ -94,7 +92,6 @@ fun SetupScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Paco Run")
         Text("Modalità")
         ModeChoice("Andamento costante", preferences.mode == RoutineMode.CONSTANT, UiTags.constantMode) {
             onPreferencesChange(preferences.copy(mode = RoutineMode.CONSTANT))
@@ -143,13 +140,7 @@ fun SetupScreen(
             onPreferencesChange(preferences.copy(dynamicColor = it))
         }
 
-        if (!preferences.isValid) Text("Correggi i campi evidenziati prima di avviare.")
-        permissionMessage?.let { Text(it) }
-        Button(
-            onClick = onStart,
-            enabled = preferences.isValid && volumeInputValid,
-            modifier = Modifier.fillMaxWidth().testTag(UiTags.start),
-        ) { Text("Avvia") }
+        if (!preferences.isValid || !volumeInputValid) Text("Correggi i campi evidenziati.")
     }
 }
 

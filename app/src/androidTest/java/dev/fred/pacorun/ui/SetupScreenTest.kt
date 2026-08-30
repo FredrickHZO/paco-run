@@ -7,8 +7,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -66,12 +64,10 @@ class SetupScreenTest {
     }
 
     @Test
-    fun invalidSpeedRangeDisablesStartAndShowsInlineError() {
+    fun invalidSpeedRangeShowsInlineError() {
         compose.setContent { EditableSetup() }
 
-        compose.onNodeWithTag(UiTags.start).assertIsEnabled()
         compose.onNodeWithTag(UiTags.constantMinSpeed).performTextReplacement("9")
-        compose.onNodeWithTag(UiTags.start).assertIsNotEnabled()
         compose.onNodeWithTag(UiTags.constantRangeError).assertIsDisplayed()
     }
 
@@ -85,7 +81,6 @@ class SetupScreenTest {
         compose.onNodeWithTag(UiTags.initialDistance).performScrollTo().performTextReplacement("-1")
         compose.onNodeWithTag(UiTags.routineUnlimited).performScrollTo().performClick()
         compose.onNodeWithTag(UiTags.routineDistance).performScrollTo().performTextReplacement("0")
-        compose.onNodeWithTag(UiTags.start).assertIsNotEnabled()
         compose.onAllNodesWithTag(UiTags.runDurationError).assertCountEquals(1)
         compose.onAllNodesWithTag(UiTags.initialDistanceError).assertCountEquals(1)
         compose.onAllNodesWithTag(UiTags.routineDistanceError).assertCountEquals(1)
@@ -95,31 +90,27 @@ class SetupScreenTest {
     }
 
     @Test
-    fun overflowInitialDistanceDisablesStart() {
+    fun overflowInitialDistanceShowsError() {
         compose.setContent {
             EditableSetup(RunPreferences(mode = dev.fred.pacorun.settings.RoutineMode.WALK_RUN, initialConstantKm = Float.POSITIVE_INFINITY))
         }
-        compose.onNodeWithTag(UiTags.start).assertIsNotEnabled()
         compose.onAllNodesWithTag(UiTags.initialDistanceError).assertCountEquals(1)
     }
 
     @Test
-    fun invalidVolumeDoesNotPersistAndDisablesStart() {
+    fun invalidVolumeDoesNotPersistAndShowsError() {
         var latest = RunPreferences()
         compose.setContent {
             SetupScreen(
                 preferences = latest,
                 onPreferencesChange = { latest = it },
-                onStart = {},
             )
         }
         compose.onNodeWithTag(UiTags.cueVolume).performScrollTo().performTextReplacement("")
-        compose.onNodeWithTag(UiTags.start).assertIsNotEnabled()
         compose.onAllNodesWithTag(UiTags.cueVolumeError).assertCountEquals(1)
         check(latest.cueVolume == .6f)
 
         compose.onNodeWithTag(UiTags.cueVolume).performTextReplacement("999999999999999999999999999999")
-        compose.onNodeWithTag(UiTags.start).assertIsNotEnabled()
         check(latest.cueVolume == .6f)
     }
 
@@ -160,6 +151,5 @@ private fun EditableSetup(initial: RunPreferences = RunPreferences()) {
     SetupScreen(
         preferences = preferences,
         onPreferencesChange = { preferences = it },
-        onStart = {},
     )
 }
