@@ -2,6 +2,7 @@ package dev.fred.pacorun.ui.home
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -9,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
@@ -45,16 +45,21 @@ class HomeScreenTest {
         composeRule.onNodeWithText("2:00").assertExists()
         composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
-        composeRule.onNodeWithTag("walk-run-plan-container").assertDoesNotExist()
+        composeRule.onNodeWithTag("walk-run-background").assertExists()
+        composeRule.onNodeWithTag("walk-run-run-background").assertExists()
+        composeRule.onNodeWithTag("walk-run-walk-background").assertExists()
         composeRule.onNodeWithTag(UiTags.start).assertHasClickAction()
-        check(composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot().width <= 160.dp)
+        composeRule.onNodeWithTag(UiTags.start).assertHeightIsEqualTo(56.dp)
+        val startBounds = composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot()
+        check(startBounds.top >= 500.dp)
+        check(composeRule.onNodeWithTag(UiTags.editRoutine).getUnclippedBoundsInRoot().top >= startBounds.bottom)
     }
 
     @Test
     fun everyTechnicalGpsReadinessHasClearCopy() {
         val state = mutableStateOf(HomeUiState(RunPreferences(), LocationReadiness.READY))
         composeRule.setContent {
-            PacoRunTheme(dynamicColor = false) { HomeScreen(state.value, {}, {}) }
+            PacoRunTheme(dynamicColor = false) { HomeScreen(state.value, {}, {}, {}) }
         }
         listOf(
             LocationReadiness.READY to "GPS pronto",
@@ -70,22 +75,34 @@ class HomeScreenTest {
     }
 
     @Test
-    fun startAndEditActionsInvokeTheirCallbacks() {
+    fun constantHomeUsesItsOwnBackgroundStructure() {
+        show(HomeUiState(RunPreferences(mode = RoutineMode.CONSTANT), LocationReadiness.READY))
+
+        composeRule.onNodeWithTag("constant-background").assertExists()
+        composeRule.onNodeWithTag("walk-run-background").assertDoesNotExist()
+    }
+
+    @Test
+    fun homeActionsAndModeSelectionInvokeTheirCallbacks() {
         var started = false
         var edited = false
+        var selectedMode: RoutineMode? = null
         composeRule.setContent {
             PacoRunTheme(dynamicColor = false) {
                 HomeScreen(
                     state = HomeUiState(RunPreferences(), LocationReadiness.READY),
                     onStart = { started = true },
                     onEdit = { edited = true },
+                    onModeChange = { selectedMode = it },
                 )
             }
         }
 
+        composeRule.onNodeWithText("Cammina–Corri").performClick()
         composeRule.onNodeWithTag(UiTags.start).performClick()
         composeRule.onNodeWithTag(UiTags.editRoutine).performClick()
         composeRule.runOnIdle {
+            check(selectedMode == RoutineMode.WALK_RUN)
             check(started)
             check(edited)
         }
@@ -93,7 +110,7 @@ class HomeScreenTest {
 
     private fun show(state: HomeUiState) {
         composeRule.setContent {
-            PacoRunTheme(dynamicColor = false) { HomeScreen(state, {}, {}) }
+            PacoRunTheme(dynamicColor = false) { HomeScreen(state, {}, {}, {}) }
         }
     }
 }

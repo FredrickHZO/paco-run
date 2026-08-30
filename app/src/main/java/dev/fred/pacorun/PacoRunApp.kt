@@ -101,6 +101,10 @@ fun PacoRunApp() {
                     state = HomeUiState(displayedPreferences, readiness),
                     onStart = requestStart,
                     onEdit = { editing = true },
+                    onModeChange = { mode ->
+                        editedPreferences = displayedPreferences.copy(mode = mode)
+                        scope.launch { store.update { it.copy(mode = mode) } }
+                    },
                 )
             }
             RunSessionState.AcquiringGps -> AcquiringGpsScreen(onStop = stop)

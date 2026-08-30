@@ -39,6 +39,7 @@ class HomePaletteActivity : ComponentActivity() {
                     ),
                     onStart = {},
                     onEdit = {},
+                    onModeChange = {},
                 )
             }
         }
