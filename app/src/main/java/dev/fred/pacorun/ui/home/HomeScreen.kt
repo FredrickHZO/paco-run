@@ -3,18 +3,14 @@ package dev.fred.pacorun.ui.home
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,10 +38,7 @@ fun HomeScreen(
         status = null,
         primaryAction = null,
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(28.dp)) {
             HomeHeader(state.locationReadiness)
             RoutineSummary(state.preferences)
             HomeActions(
@@ -86,13 +79,12 @@ private fun HomeActions(
     onStart: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
             onClick = onStart,
             shapes = ButtonDefaults.shapesFor(buttonHeight),
             enabled = enabled,
             modifier = Modifier
-                .fillMaxWidth()
                 .heightIn(min = buttonHeight)
                 .testTag(UiTags.start),
             contentPadding = ButtonDefaults.contentPaddingFor(buttonHeight),
@@ -101,7 +93,7 @@ private fun HomeActions(
         }
         TextButton(
             onClick = onEdit,
-            modifier = Modifier.fillMaxWidth().testTag(UiTags.editRoutine),
+            modifier = Modifier.testTag(UiTags.editRoutine),
         ) { Text("Modifica routine") }
     }
 }
@@ -117,53 +109,37 @@ private fun RoutineSummary(preferences: RunPreferences) {
             Text(preferences.constantRange.label, style = MaterialTheme.typography.displaySmall)
         } else {
             Text(
-                "${preferences.initialConstantKm.number()} km iniziali · ${preferences.constantRange.label}",
+                "${preferences.initialConstantKm.number()} km iniziali · " +
+                    if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
                 style = MaterialTheme.typography.titleLarge,
             )
             PhasePlan(preferences)
-            Text(
-                if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
-                style = MaterialTheme.typography.titleMedium,
-            )
         }
     }
 }
 
 @Composable
 private fun PhasePlan(preferences: RunPreferences) {
-    Surface(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PhaseSummary("Corri", preferences.runSeconds, preferences.runRange.label)
-            HorizontalDivider()
-            PhaseSummary(
-                "Cammina",
-                preferences.walkSeconds,
-                (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
-            )
-        }
+        PhaseSummary("Corri", preferences.runSeconds, preferences.runRange.label, Modifier.weight(1f))
+        PhaseSummary(
+            "Cammina",
+            preferences.walkSeconds,
+            (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
+            Modifier.weight(1f),
+        )
     }
 }
 
 @Composable
-private fun PhaseSummary(label: String, seconds: Int, pace: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+private fun PhaseSummary(label: String, seconds: Int, pace: String, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, style = MaterialTheme.typography.titleMedium)
-        Column(horizontalAlignment = Alignment.End) {
-            Text(seconds.duration(), style = MaterialTheme.typography.headlineSmall)
-            Text(pace, style = MaterialTheme.typography.bodyMedium)
-        }
+        Text(seconds.duration(), style = MaterialTheme.typography.headlineMedium)
+        Text(pace, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

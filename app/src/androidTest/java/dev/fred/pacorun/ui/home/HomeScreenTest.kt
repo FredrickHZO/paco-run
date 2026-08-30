@@ -3,10 +3,13 @@ package dev.fred.pacorun.ui.home
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
@@ -40,9 +43,11 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Cammina–Corri").assertExists()
         composeRule.onNodeWithText("1:00").assertExists()
         composeRule.onNodeWithText("2:00").assertExists()
-        composeRule.onNodeWithText("Senza fine").assertExists()
+        composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithTag("walk-run-plan-container").assertDoesNotExist()
         composeRule.onNodeWithTag(UiTags.start).assertHasClickAction()
+        check(composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot().width <= 160.dp)
     }
 
     @Test
