@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -19,10 +20,11 @@ fun PacoRunScaffold(
     title: String?,
     status: (@Composable () -> Unit)?,
     primaryAction: (@Composable () -> Unit)?,
+    containerColor: Color = MaterialTheme.colorScheme.background,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = containerColor,
         contentWindowInsets = WindowInsets.safeDrawing,
     ) { insets ->
         Column(

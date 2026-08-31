@@ -2,9 +2,12 @@ package dev.fred.pacorun.ui.home
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -45,9 +48,12 @@ class HomeScreenTest {
         composeRule.onNodeWithText("2:00").assertExists()
         composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
-        composeRule.onNodeWithTag("walk-run-background").assertExists()
-        composeRule.onNodeWithTag("walk-run-run-background").assertExists()
-        composeRule.onNodeWithTag("walk-run-walk-background").assertExists()
+        composeRule.onNodeWithTag("home-scene-background").assertExists()
+        composeRule.onNodeWithTag("walk-run-scene").assertExists()
+        composeRule.onNodeWithTag("run-phase-shape")
+            .assert(hasAnyDescendant(hasTestTag("run-phase-content")))
+        composeRule.onNodeWithTag("walk-phase-shape")
+            .assert(hasAnyDescendant(hasTestTag("walk-phase-content")))
         composeRule.onNodeWithTag(UiTags.start).assertHasClickAction()
         composeRule.onNodeWithTag(UiTags.start).assertHeightIsEqualTo(56.dp)
         val startBounds = composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot()
@@ -78,8 +84,14 @@ class HomeScreenTest {
     fun constantHomeUsesItsOwnBackgroundStructure() {
         show(HomeUiState(RunPreferences(mode = RoutineMode.CONSTANT), LocationReadiness.READY))
 
-        composeRule.onNodeWithTag("constant-background").assertExists()
-        composeRule.onNodeWithTag("walk-run-background").assertDoesNotExist()
+        composeRule.onNodeWithTag("constant-scene").assertExists()
+        val shape = composeRule.onNodeWithTag("constant-phase-shape")
+            .assert(hasAnyDescendant(hasTestTag("constant-phase-content")))
+            .getUnclippedBoundsInRoot()
+        val range = composeRule.onNodeWithText("7,5–8,5 km/h").getUnclippedBoundsInRoot()
+        check(range.left >= shape.left + 40.dp)
+        check(range.right <= shape.right - 40.dp)
+        composeRule.onNodeWithTag("walk-run-scene").assertDoesNotExist()
     }
 
     @Test

@@ -1,15 +1,13 @@
 package dev.fred.pacorun.ui.home
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,22 +15,42 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.toPath
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.graphics.shapes.Morph
 import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
 import dev.fred.pacorun.settings.RunPreferences
@@ -49,27 +67,43 @@ fun HomeScreen(
     onModeChange: (RoutineMode) -> Unit,
 ) {
     val buttonHeight = ButtonDefaults.MediumContainerHeight
-    PacoRunScaffold(
-        title = null,
-        status = null,
-        primaryAction = null,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.surfaceContainerLow,
+                        MaterialTheme.colorScheme.surfaceContainer,
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                ),
+            )
+            .testTag("home-scene-background"),
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(28.dp),
+        PacoRunScaffold(
+            title = null,
+            status = null,
+            primaryAction = null,
+            containerColor = Color.Transparent,
         ) {
-            HomeHeader(state.locationReadiness)
-            RoutineSummary(
-                preferences = state.preferences,
-                onModeChange = onModeChange,
-                modifier = Modifier.weight(1f),
-            )
-            HomeActions(
-                buttonHeight = buttonHeight,
-                enabled = state.preferences.isValid,
-                onStart = onStart,
-                onEdit = onEdit,
-            )
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(28.dp),
+            ) {
+                HomeHeader(state.locationReadiness)
+                RoutineSummary(
+                    preferences = state.preferences,
+                    onModeChange = onModeChange,
+                    modifier = Modifier.weight(1f),
+                )
+                HomeActions(
+                    buttonHeight = buttonHeight,
+                    enabled = state.preferences.isValid,
+                    onStart = onStart,
+                    onEdit = onEdit,
+                )
+            }
         }
     }
 }
@@ -97,7 +131,7 @@ private fun HomeHeader(readiness: LocationReadiness) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun HomeActions(
-    buttonHeight: androidx.compose.ui.unit.Dp,
+    buttonHeight: Dp,
     enabled: Boolean,
     onStart: () -> Unit,
     onEdit: () -> Unit,
@@ -128,82 +162,172 @@ private fun RoutineSummary(
     onModeChange: (RoutineMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val motionScheme = MaterialTheme.motionScheme
     Column(modifier = modifier.fillMaxWidth()) {
         ModeSelector(preferences.mode, onModeChange)
-        Spacer(Modifier.weight(1f))
-        AnimatedContent(
-            targetState = preferences.mode,
-            transitionSpec = {
-                fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) togetherWith
-                    fadeOut(animationSpec = motionScheme.fastEffectsSpec())
-            },
-            label = "routine-object",
-        ) { mode ->
-            if (mode == RoutineMode.CONSTANT) ConstantRoutineObject(preferences)
-            else WalkRunRoutineObject(preferences)
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            RoutineScene(preferences)
         }
-        Spacer(Modifier.weight(1f))
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WalkRunRoutineObject(preferences: RunPreferences) {
-    val runDiameter = phaseDiameter(preferences.runSeconds)
-    val walkDiameter = phaseDiameter(preferences.walkSeconds)
+private fun RoutineScene(preferences: RunPreferences) {
+    val motionScheme = MaterialTheme.motionScheme
+    val transition = updateTransition(preferences.mode, label = "routine-scene")
+    val morphProgress by transition.animateFloat(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "primary-shape-morph",
+    ) { if (it == RoutineMode.CONSTANT) 1f else 0f }
+    val primarySize by transition.animateDp(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "primary-shape-size",
+    ) { if (it == RoutineMode.CONSTANT) 286.dp else 196.dp }
+    val primaryX by transition.animateDp(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "primary-shape-x",
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-66).dp }
+    val primaryY by transition.animateDp(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "primary-shape-y",
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-38).dp }
+    val secondaryX by transition.animateDp(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "secondary-shape-x",
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else 66.dp }
+    val secondaryY by transition.animateDp(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "secondary-shape-y",
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else 48.dp }
+    val secondaryScale by transition.animateFloat(
+        transitionSpec = { motionScheme.defaultSpatialSpec() },
+        label = "secondary-shape-scale",
+    ) { if (it == RoutineMode.CONSTANT) 0.55f else 1f }
+    val secondaryAlpha by transition.animateFloat(
+        transitionSpec = { motionScheme.fastEffectsSpec() },
+        label = "secondary-shape-alpha",
+    ) { if (it == RoutineMode.CONSTANT) 0f else 1f }
+    val primaryMorph = remember { Morph(MaterialShapes.Oval, MaterialShapes.ClamShell) }
+    val primaryShape = remember(primaryMorph, morphProgress) { MorphShape(primaryMorph, morphProgress) }
+    val secondaryShape = MaterialShapes.ClamShell.toShape(startAngle = 24)
+    val walkRunVisible = transition.currentState == RoutineMode.WALK_RUN ||
+        transition.targetState == RoutineMode.WALK_RUN
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(300.dp)
-            .testTag("walk-run-background"),
+            .height(340.dp)
+            .testTag(if (preferences.mode == RoutineMode.CONSTANT) "constant-scene" else "walk-run-scene"),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = (-52).dp, y = 8.dp)
-                .size(runDiameter)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .testTag("walk-run-run-background"),
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 52.dp, y = 4.dp)
-                .size(walkDiameter)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.tertiaryContainer)
-                .testTag("walk-run-walk-background"),
-        )
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        if (walkRunVisible) {
             Text(
                 "${preferences.initialConstantKm.number()} km iniziali · " +
                     if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
                 style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.TopCenter),
+                textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.weight(1f))
-            PhaseTypography(
-                label = "Corri",
-                seconds = preferences.runSeconds,
-                pace = preferences.runRange.label,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.align(Alignment.Start),
-            )
-            Spacer(Modifier.weight(1f))
-            PhaseTypography(
-                label = "Cammina",
-                seconds = preferences.walkSeconds,
-                pace = (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                modifier = Modifier.align(Alignment.End),
-            )
+        }
+        PhaseShape(
+            shape = primaryShape,
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.86f),
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            shapeTag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-shape" else "run-phase-shape",
+            contentTag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-content" else "run-phase-content",
+            modifier = Modifier.size(primarySize).offset(primaryX, primaryY),
+        ) {
+            if (preferences.mode == RoutineMode.CONSTANT) {
+                ConstantTypography(preferences.constantRange.label)
+            } else {
+                PhaseTypography("Corri", preferences.runSeconds, preferences.runRange.label)
+            }
+        }
+        if (walkRunVisible) {
+            PhaseShape(
+                shape = secondaryShape,
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.78f),
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                shapeTag = "walk-phase-shape",
+                contentTag = "walk-phase-content",
+                modifier = Modifier
+                    .size(198.dp)
+                    .offset(secondaryX, secondaryY)
+                    .graphicsLayer {
+                        alpha = secondaryAlpha
+                        scaleX = secondaryScale
+                        scaleY = secondaryScale
+                    },
+            ) {
+                PhaseTypography(
+                    "Cammina",
+                    preferences.walkSeconds,
+                    (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
+                )
+            }
         }
     }
 }
 
+@Composable
+private fun PhaseShape(
+    shape: Shape,
+    containerColor: Color,
+    contentColor: Color,
+    shapeTag: String,
+    contentTag: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(containerColor)
+            .testTag(shapeTag)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.testTag(contentTag),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            CompositionLocalProvider(LocalContentColor provides contentColor, content = content)
+        }
+    }
+}
+
+@Composable
+private fun ConstantTypography(pace: String) {
+    Text("Andatura costante", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    Text(pace, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, maxLines = 1)
+}
+
+@Composable
+private fun PhaseTypography(label: String, seconds: Int, pace: String) {
+    Text(label, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
+    Text(seconds.duration(), style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+    Text(pace, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1)
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private class MorphShape(morph: Morph, progress: Float) : Shape {
+    private val source = morph.toPath(progress = progress, startAngle = -90)
+    private val path = Path()
+
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        path.rewind()
+        path.addPath(source)
+        path.transform(Matrix().apply { scale(size.width, size.height) })
+        path.translate(size.center - path.getBounds().center)
+        return Outline.Generic(path)
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ModeSelector(mode: RoutineMode, onModeChange: (RoutineMode) -> Unit) {
     ButtonGroup(
@@ -224,55 +348,6 @@ private fun ModeSelector(mode: RoutineMode, onModeChange: (RoutineMode) -> Unit)
         )
     }
 }
-
-@Composable
-private fun ConstantRoutineObject(preferences: RunPreferences) {
-    val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .testTag("constant-background"),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(320.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-        )
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Andatura costante", style = MaterialTheme.typography.titleMedium, color = contentColor)
-            Text(
-                preferences.constantRange.label,
-                style = MaterialTheme.typography.displayMedium,
-                color = contentColor,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PhaseTypography(
-    label: String,
-    seconds: Int,
-    pace: String,
-    color: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.titleMedium, color = color)
-        Text(seconds.duration(), style = MaterialTheme.typography.displaySmall, color = color)
-        Text(pace, style = MaterialTheme.typography.bodyMedium, color = color)
-    }
-}
-
-private fun phaseDiameter(seconds: Int) =
-    (180f + seconds * 0.8f).coerceIn(216f, 292f).dp
 
 private val LocationReadiness.label: String
     get() = when (this) {
