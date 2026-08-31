@@ -21,10 +21,12 @@ fun PacoRunScaffold(
     status: (@Composable () -> Unit)?,
     primaryAction: (@Composable () -> Unit)?,
     containerColor: Color = MaterialTheme.colorScheme.background,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(
         containerColor = containerColor,
+        contentColor = contentColor,
         contentWindowInsets = WindowInsets.safeDrawing,
     ) { insets ->
         Column(

@@ -17,6 +17,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
 import dev.fred.pacorun.settings.RunPreferences
+import dev.fred.pacorun.settings.SpeedRange
 import dev.fred.pacorun.ui.UiTags
 import dev.fred.pacorun.ui.theme.PacoRunTheme
 import org.junit.Rule
@@ -49,6 +50,9 @@ class HomeScreenTest {
         composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
         composeRule.onNodeWithTag("home-scene-background").assertExists()
+        composeRule.onNodeWithTag("ambient-layer")
+            .assert(hasAnyDescendant(hasTestTag("ambient-shape-primary")))
+            .assert(hasAnyDescendant(hasTestTag("ambient-shape-secondary")))
         composeRule.onNodeWithTag("walk-run-scene").assertExists()
         composeRule.onNodeWithTag("run-phase-shape")
             .assert(hasAnyDescendant(hasTestTag("run-phase-content")))
@@ -82,13 +86,21 @@ class HomeScreenTest {
 
     @Test
     fun constantHomeUsesItsOwnBackgroundStructure() {
-        show(HomeUiState(RunPreferences(mode = RoutineMode.CONSTANT), LocationReadiness.READY))
+        show(
+            HomeUiState(
+                RunPreferences(
+                    mode = RoutineMode.CONSTANT,
+                    constantRange = SpeedRange(10.5f, 12.5f),
+                ),
+                LocationReadiness.READY,
+            ),
+        )
 
         composeRule.onNodeWithTag("constant-scene").assertExists()
         val shape = composeRule.onNodeWithTag("constant-phase-shape")
             .assert(hasAnyDescendant(hasTestTag("constant-phase-content")))
             .getUnclippedBoundsInRoot()
-        val range = composeRule.onNodeWithText("7,5–8,5 km/h").getUnclippedBoundsInRoot()
+        val range = composeRule.onNodeWithText("10,5–12,5 km/h").getUnclippedBoundsInRoot()
         check(range.left >= shape.left + 40.dp)
         check(range.right <= shape.right - 40.dp)
         composeRule.onNodeWithTag("walk-run-scene").assertDoesNotExist()

@@ -2,6 +2,11 @@ package dev.fred.pacorun.ui.home
 
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -44,12 +50,15 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.graphics.shapes.Morph
 import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
@@ -67,25 +76,30 @@ fun HomeScreen(
     onModeChange: (RoutineMode) -> Unit,
 ) {
     val buttonHeight = ButtonDefaults.MediumContainerHeight
+    val colors = MaterialTheme.colorScheme
+    val lightScheme = colors.surface.luminance() > 0.5f
+    val tonalBlend = if (lightScheme) 0.16f else 0.06f
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        MaterialTheme.colorScheme.surfaceContainerLow,
-                        MaterialTheme.colorScheme.surfaceContainer,
-                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                        lerp(colors.surfaceContainer, colors.primaryContainer, tonalBlend),
+                        colors.surfaceContainerHigh,
+                        lerp(colors.surfaceContainerHighest, colors.tertiaryContainer, tonalBlend),
                     ),
                 ),
             )
             .testTag("home-scene-background"),
     ) {
+        AmbientBackground(lightScheme)
         PacoRunScaffold(
             title = null,
             status = null,
             primaryAction = null,
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -106,6 +120,61 @@ fun HomeScreen(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AmbientBackground(lightScheme: Boolean) {
+    val transition = rememberInfiniteTransition(label = "ambient-home")
+    val drift by transition.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 35_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "ambient-drift",
+    )
+    val upperOval = MaterialShapes.Oval.toShape(startAngle = -20)
+    val lowerOval = MaterialShapes.Oval.toShape(startAngle = 28)
+    val primaryAlpha = if (lightScheme) 0.18f else 0.09f
+    val secondaryAlpha = if (lightScheme) 0.14f else 0.07f
+
+    Box(Modifier.fillMaxSize().testTag("ambient-layer")) {
+        AmbientShape(
+            shape = upperOval,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = primaryAlpha),
+            tag = "ambient-shape-primary",
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 250.dp, y = (-220).dp)
+                .size(520.dp)
+                .graphicsLayer {
+                    translationX = drift * (-18).dp.toPx()
+                    translationY = drift * 12.dp.toPx()
+                    rotationZ = drift * 2.5f
+                },
+        )
+        AmbientShape(
+            shape = lowerOval,
+            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = secondaryAlpha),
+            tag = "ambient-shape-secondary",
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = (-310).dp, y = 230.dp)
+                .size(580.dp)
+                .graphicsLayer {
+                    translationX = drift * 16.dp.toPx()
+                    translationY = drift * (-20).dp.toPx()
+                    rotationZ = drift * -2f
+                },
+        )
+    }
+}
+
+@Composable
+private fun AmbientShape(shape: Shape, color: Color, tag: String, modifier: Modifier) {
+    Box(modifier.clip(shape).background(color).testTag(tag))
 }
 
 @Composable
@@ -185,23 +254,23 @@ private fun RoutineScene(preferences: RunPreferences) {
     val primarySize by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-size",
-    ) { if (it == RoutineMode.CONSTANT) 286.dp else 196.dp }
+    ) { if (it == RoutineMode.CONSTANT) 320.dp else 214.dp }
     val primaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-66).dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-56).dp }
     val primaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-38).dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-34).dp }
     val secondaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else 66.dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else 57.dp }
     val secondaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else 48.dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else 44.dp }
     val secondaryScale by transition.animateFloat(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-scale",
@@ -254,7 +323,7 @@ private fun RoutineScene(preferences: RunPreferences) {
                 shapeTag = "walk-phase-shape",
                 contentTag = "walk-phase-content",
                 modifier = Modifier
-                    .size(198.dp)
+                    .size(216.dp)
                     .offset(secondaryX, secondaryY)
                     .graphicsLayer {
                         alpha = secondaryAlpha
@@ -303,7 +372,18 @@ private fun PhaseShape(
 @Composable
 private fun ConstantTypography(pace: String) {
     Text("Andatura costante", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-    Text(pace, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, maxLines = 1)
+    Text(
+        pace,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = 16.sp,
+            maxFontSize = MaterialTheme.typography.headlineLarge.fontSize,
+            stepSize = 1.sp,
+        ),
+        style = MaterialTheme.typography.headlineLarge,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+    )
 }
 
 @Composable
