@@ -2,8 +2,8 @@ package dev.fred.pacorun.ui.home
 
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -41,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
@@ -50,7 +52,6 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
@@ -78,22 +79,12 @@ fun HomeScreen(
     val buttonHeight = ButtonDefaults.MediumContainerHeight
     val colors = MaterialTheme.colorScheme
     val lightScheme = colors.surface.luminance() > 0.5f
-    val tonalBlend = if (lightScheme) 0.16f else 0.06f
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        lerp(colors.surfaceContainer, colors.primaryContainer, tonalBlend),
-                        colors.surfaceContainerHigh,
-                        lerp(colors.surfaceContainerHighest, colors.tertiaryContainer, tonalBlend),
-                    ),
-                ),
-            )
             .testTag("home-scene-background"),
     ) {
-        AmbientBackground(lightScheme)
+        AnimatedGradientField(lightScheme)
         PacoRunScaffold(
             title = null,
             status = null,
@@ -122,59 +113,57 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AmbientBackground(lightScheme: Boolean) {
-    val transition = rememberInfiniteTransition(label = "ambient-home")
-    val drift by transition.animateFloat(
-        initialValue = -1f,
+private fun AnimatedGradientField(lightScheme: Boolean) {
+    val transition = rememberInfiniteTransition(label = "home-gradient")
+    val travel by transition.animateFloat(
+        initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 35_000, easing = LinearEasing),
+            animation = tween(durationMillis = 9_000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
-        label = "ambient-drift",
+        label = "gradient-travel",
     )
-    val upperOval = MaterialShapes.Oval.toShape(startAngle = -20)
-    val lowerOval = MaterialShapes.Oval.toShape(startAngle = 28)
-    val primaryAlpha = if (lightScheme) 0.18f else 0.09f
-    val secondaryAlpha = if (lightScheme) 0.14f else 0.07f
-
-    Box(Modifier.fillMaxSize().testTag("ambient-layer")) {
-        AmbientShape(
-            shape = upperOval,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = primaryAlpha),
-            tag = "ambient-shape-primary",
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 250.dp, y = (-220).dp)
-                .size(520.dp)
-                .graphicsLayer {
-                    translationX = drift * (-18).dp.toPx()
-                    translationY = drift * 12.dp.toPx()
-                    rotationZ = drift * 2.5f
-                },
-        )
-        AmbientShape(
-            shape = lowerOval,
-            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = secondaryAlpha),
-            tag = "ambient-shape-secondary",
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .offset(x = (-310).dp, y = 230.dp)
-                .size(580.dp)
-                .graphicsLayer {
-                    translationX = drift * 16.dp.toPx()
-                    translationY = drift * (-20).dp.toPx()
-                    rotationZ = drift * -2f
-                },
-        )
-    }
-}
-
-@Composable
-private fun AmbientShape(shape: Shape, color: Color, tag: String, modifier: Modifier) {
-    Box(modifier.clip(shape).background(color).testTag(tag))
+    val colors = MaterialTheme.colorScheme
+    val fieldAlpha = if (lightScheme) 0.46f else 0.34f
+    Box(
+        Modifier
+            .fillMaxSize()
+            .drawBehind {
+                drawRect(
+                    Brush.linearGradient(
+                        listOf(colors.surfaceContainerLow, colors.surfaceContainerHigh),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height),
+                    ),
+                )
+                val radius = size.maxDimension * 0.82f
+                val primary = colors.primaryContainer
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(primary.copy(alpha = fieldAlpha), primary.copy(alpha = 0f)),
+                        center = Offset(
+                            x = size.width * (-0.1f + 1.2f * travel),
+                            y = size.height * (0.08f + 0.52f * travel),
+                        ),
+                        radius = radius,
+                    ),
+                )
+                val tertiary = colors.tertiaryContainer
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(tertiary.copy(alpha = fieldAlpha), tertiary.copy(alpha = 0f)),
+                        center = Offset(
+                            x = size.width * (1.1f - 1.15f * travel),
+                            y = size.height * (0.92f - 0.5f * travel),
+                        ),
+                        radius = radius,
+                    ),
+                )
+            }
+            .testTag("ambient-gradient-field"),
+    )
 }
 
 @Composable
@@ -258,19 +247,19 @@ private fun RoutineScene(preferences: RunPreferences) {
     val primaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-56).dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-72).dp }
     val primaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-34).dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-60).dp }
     val secondaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else 57.dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else 72.dp }
     val secondaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else 44.dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else 62.dp }
     val secondaryScale by transition.animateFloat(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-scale",
