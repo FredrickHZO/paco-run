@@ -23,7 +23,7 @@ import dev.fred.pacorun.ui.theme.PacoRunTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import kotlin.math.hypot
+import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class HomeScreenTest {
@@ -51,27 +51,26 @@ class HomeScreenTest {
         composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
         val background = composeRule.onNodeWithTag("home-scene-background").getUnclippedBoundsInRoot()
-        val gradient = composeRule.onNodeWithTag("ambient-gradient-field").getUnclippedBoundsInRoot()
-        check(gradient == background)
+        val ambient = composeRule.onNodeWithTag("ambient-shape-field")
+            .assert(hasAnyDescendant(hasTestTag("ambient-shape-upper")))
+            .assert(hasAnyDescendant(hasTestTag("ambient-shape-middle")))
+            .assert(hasAnyDescendant(hasTestTag("ambient-shape-lower")))
+            .getUnclippedBoundsInRoot()
+        check(ambient == background)
+        composeRule.onNodeWithTag("ambient-gradient-field").assertDoesNotExist()
         composeRule.onNodeWithTag("walk-run-scene").assertExists()
-        val runShape = composeRule.onNodeWithTag("run-phase-shape")
+        composeRule.onNodeWithTag("phase-backdrop-layer")
+            .assert(hasAnyDescendant(hasTestTag("run-phase-shape")))
+            .assert(hasAnyDescendant(hasTestTag("walk-phase-shape")))
+        composeRule.onNodeWithTag("phase-content-layer")
             .assert(hasAnyDescendant(hasTestTag("run-phase-content")))
-            .getUnclippedBoundsInRoot()
-        val walkShape = composeRule.onNodeWithTag("walk-phase-shape")
             .assert(hasAnyDescendant(hasTestTag("walk-phase-content")))
-            .getUnclippedBoundsInRoot()
+        val runShape = composeRule.onNodeWithTag("run-phase-shape").getUnclippedBoundsInRoot()
+        val walkShape = composeRule.onNodeWithTag("walk-phase-shape").getUnclippedBoundsInRoot()
         val runContent = composeRule.onNodeWithTag("run-phase-content").getUnclippedBoundsInRoot()
         val walkContent = composeRule.onNodeWithTag("walk-phase-content").getUnclippedBoundsInRoot()
-        val centerDistance = hypot(
-            ((runShape.left + runShape.right - walkShape.left - walkShape.right) / 2).value,
-            ((runShape.top + runShape.bottom - walkShape.top - walkShape.bottom) / 2).value,
-        )
-        val overlapDepth = (
-            runShape.right.value - runShape.left.value + walkShape.right.value - walkShape.left.value
-        ) / 2 - centerDistance
-        check(overlapDepth in 20f..28f)
-        checkOutsideBoundingCircle(walkShape, runContent)
-        checkOutsideBoundingCircle(runShape, walkContent)
+        checkSameCenter(runShape, runContent)
+        checkSameCenter(walkShape, walkContent)
         composeRule.onNodeWithTag(UiTags.start).assertHasClickAction()
         composeRule.onNodeWithTag(UiTags.start).assertHeightIsEqualTo(56.dp)
         val startBounds = composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot()
@@ -111,9 +110,15 @@ class HomeScreenTest {
         )
 
         composeRule.onNodeWithTag("constant-scene").assertExists()
-        val shape = composeRule.onNodeWithTag("constant-phase-shape")
+        val shape = composeRule.onNodeWithTag("constant-phase-shape").getUnclippedBoundsInRoot()
+        composeRule.onNodeWithTag("phase-backdrop-layer")
+            .assert(hasAnyDescendant(hasTestTag("constant-phase-shape")))
+        composeRule.onNodeWithTag("phase-content-layer")
             .assert(hasAnyDescendant(hasTestTag("constant-phase-content")))
-            .getUnclippedBoundsInRoot()
+        checkSameCenter(
+            shape,
+            composeRule.onNodeWithTag("constant-phase-content").getUnclippedBoundsInRoot(),
+        )
         val range = composeRule.onNodeWithText("10,5–12,5 km/h").getUnclippedBoundsInRoot()
         check(range.left >= shape.left + 40.dp)
         check(range.right <= shape.right - 40.dp)
@@ -152,18 +157,11 @@ class HomeScreenTest {
         }
     }
 
-    private fun checkOutsideBoundingCircle(
+    private fun checkSameCenter(
         shape: androidx.compose.ui.unit.DpRect,
         content: androidx.compose.ui.unit.DpRect,
     ) {
-        val centerX = (shape.left.value + shape.right.value) / 2
-        val centerY = (shape.top.value + shape.bottom.value) / 2
-        val dx = maxOf(content.left.value - centerX, 0f, centerX - content.right.value)
-        val dy = maxOf(content.top.value - centerY, 0f, centerY - content.bottom.value)
-        val radius = minOf(
-            shape.right.value - shape.left.value,
-            shape.bottom.value - shape.top.value,
-        ) / 2
-        check(hypot(dx, dy) >= radius)
+        check(abs(shape.left.value + shape.right.value - content.left.value - content.right.value) <= 1f)
+        check(abs(shape.top.value + shape.bottom.value - content.top.value - content.bottom.value) <= 1f)
     }
 }

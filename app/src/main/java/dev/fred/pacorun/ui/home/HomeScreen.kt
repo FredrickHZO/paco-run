@@ -2,8 +2,8 @@ package dev.fred.pacorun.ui.home
 
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -41,11 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Outline
@@ -67,6 +64,9 @@ import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.ui.UiTags
 import dev.fred.pacorun.ui.components.PacoRunScaffold
 import java.util.Locale
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -82,9 +82,10 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(colors.surface)
             .testTag("home-scene-background"),
     ) {
-        AnimatedGradientField(lightScheme)
+        AmbientShapeField(lightScheme)
         PacoRunScaffold(
             title = null,
             status = null,
@@ -113,57 +114,76 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AnimatedGradientField(lightScheme: Boolean) {
-    val transition = rememberInfiniteTransition(label = "home-gradient")
-    val travel by transition.animateFloat(
+private fun AmbientShapeField(lightScheme: Boolean) {
+    val transition = rememberInfiniteTransition(label = "ambient-home")
+    val phase by transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 9_000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
+            animation = tween(durationMillis = 9_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
         ),
-        label = "gradient-travel",
+        label = "ambient-phase",
     )
+    val radians = phase * (PI.toFloat() / 180f)
+    val wave = sin(radians)
+    val crossingWave = cos(radians)
     val colors = MaterialTheme.colorScheme
-    val fieldAlpha = if (lightScheme) 0.46f else 0.34f
-    Box(
-        Modifier
-            .fillMaxSize()
-            .drawBehind {
-                drawRect(
-                    Brush.linearGradient(
-                        listOf(colors.surfaceContainerLow, colors.surfaceContainerHigh),
-                        start = Offset.Zero,
-                        end = Offset(size.width, size.height),
-                    ),
-                )
-                val radius = size.maxDimension * 0.82f
-                val primary = colors.primaryContainer
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(primary.copy(alpha = fieldAlpha), primary.copy(alpha = 0f)),
-                        center = Offset(
-                            x = size.width * (-0.1f + 1.2f * travel),
-                            y = size.height * (0.08f + 0.52f * travel),
-                        ),
-                        radius = radius,
-                    ),
-                )
-                val tertiary = colors.tertiaryContainer
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(tertiary.copy(alpha = fieldAlpha), tertiary.copy(alpha = 0f)),
-                        center = Offset(
-                            x = size.width * (1.1f - 1.15f * travel),
-                            y = size.height * (0.92f - 0.5f * travel),
-                        ),
-                        radius = radius,
-                    ),
-                )
-            }
-            .testTag("ambient-gradient-field"),
-    )
+    val primaryAlpha = if (lightScheme) 0.32f else 0.10f
+    val secondaryAlpha = if (lightScheme) 0.27f else 0.08f
+    val tertiaryAlpha = if (lightScheme) 0.25f else 0.08f
+
+    Box(Modifier.fillMaxSize().testTag("ambient-shape-field")) {
+        AmbientShape(
+            shape = MaterialShapes.Oval.toShape(startAngle = -18),
+            color = colors.primaryContainer.copy(alpha = primaryAlpha),
+            tag = "ambient-shape-upper",
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(x = (-82).dp, y = 28.dp)
+                .size(width = 430.dp, height = 310.dp)
+                .graphicsLayer {
+                    translationX = crossingWave * 18.dp.toPx()
+                    translationY = wave * 12.dp.toPx()
+                    rotationZ = wave * 5f
+                },
+        )
+        AmbientShape(
+            shape = MaterialShapes.ClamShell.toShape(startAngle = 32),
+            color = colors.secondaryContainer.copy(alpha = secondaryAlpha),
+            tag = "ambient-shape-middle",
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .offset(x = 118.dp, y = (-12).dp)
+                .size(390.dp)
+                .graphicsLayer {
+                    translationX = wave * (-14).dp.toPx()
+                    translationY = crossingWave * 22.dp.toPx()
+                    rotationZ = crossingWave * -4f
+                },
+        )
+        AmbientShape(
+            shape = MaterialShapes.Puffy.toShape(startAngle = -12),
+            color = colors.tertiaryContainer.copy(alpha = tertiaryAlpha),
+            tag = "ambient-shape-lower",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(x = (-68).dp, y = 108.dp)
+                .size(460.dp)
+                .graphicsLayer {
+                    translationX = crossingWave * (-20).dp.toPx()
+                    translationY = wave * (-16).dp.toPx()
+                    rotationZ = wave * -3f
+                },
+        )
+    }
+}
+
+@Composable
+private fun AmbientShape(shape: Shape, color: Color, tag: String, modifier: Modifier) {
+    Box(modifier.clip(shape).background(color).testTag(tag))
 }
 
 @Composable
@@ -247,19 +267,19 @@ private fun RoutineScene(preferences: RunPreferences) {
     val primaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-72).dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-56).dp }
     val primaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-60).dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-34).dp }
     val secondaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else 72.dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else 57.dp }
     val secondaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else 62.dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else 44.dp }
     val secondaryScale by transition.animateFloat(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-scale",
@@ -273,6 +293,15 @@ private fun RoutineScene(preferences: RunPreferences) {
     val secondaryShape = MaterialShapes.ClamShell.toShape(startAngle = 24)
     val walkRunVisible = transition.currentState == RoutineMode.WALK_RUN ||
         transition.targetState == RoutineMode.WALK_RUN
+    val primaryModifier = Modifier.size(primarySize).offset(primaryX, primaryY)
+    val secondaryModifier = Modifier
+        .size(216.dp)
+        .offset(secondaryX, secondaryY)
+        .graphicsLayer {
+            alpha = secondaryAlpha
+            scaleX = secondaryScale
+            scaleY = secondaryScale
+        }
 
     Box(
         modifier = Modifier
@@ -290,70 +319,79 @@ private fun RoutineScene(preferences: RunPreferences) {
                 textAlign = TextAlign.Center,
             )
         }
-        PhaseShape(
-            shape = primaryShape,
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.86f),
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            shapeTag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-shape" else "run-phase-shape",
-            contentTag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-content" else "run-phase-content",
-            modifier = Modifier.size(primarySize).offset(primaryX, primaryY),
+        Box(
+            modifier = Modifier.fillMaxSize().testTag("phase-backdrop-layer"),
+            contentAlignment = Alignment.Center,
         ) {
-            if (preferences.mode == RoutineMode.CONSTANT) {
-                ConstantTypography(preferences.constantRange.label)
-            } else {
-                PhaseTypography("Corri", preferences.runSeconds, preferences.runRange.label)
+            PhaseBackdrop(
+                shape = primaryShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.86f),
+                tag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-shape" else "run-phase-shape",
+                modifier = primaryModifier,
+            )
+            if (walkRunVisible) {
+                PhaseBackdrop(
+                    shape = secondaryShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.78f),
+                    tag = "walk-phase-shape",
+                    modifier = secondaryModifier,
+                )
             }
         }
-        if (walkRunVisible) {
-            PhaseShape(
-                shape = secondaryShape,
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.78f),
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                shapeTag = "walk-phase-shape",
-                contentTag = "walk-phase-content",
-                modifier = Modifier
-                    .size(216.dp)
-                    .offset(secondaryX, secondaryY)
-                    .graphicsLayer {
-                        alpha = secondaryAlpha
-                        scaleX = secondaryScale
-                        scaleY = secondaryScale
-                    },
+        Box(
+            modifier = Modifier.fillMaxSize().testTag("phase-content-layer"),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhaseContent(
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                tag = if (preferences.mode == RoutineMode.CONSTANT) "constant-phase-content" else "run-phase-content",
+                modifier = primaryModifier,
             ) {
-                PhaseTypography(
-                    "Cammina",
-                    preferences.walkSeconds,
-                    (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
-                )
+                if (preferences.mode == RoutineMode.CONSTANT) {
+                    ConstantTypography(preferences.constantRange.label)
+                } else {
+                    PhaseTypography("Corri", preferences.runSeconds, preferences.runRange.label)
+                }
+            }
+            if (walkRunVisible) {
+                PhaseContent(
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    tag = "walk-phase-content",
+                    modifier = secondaryModifier,
+                ) {
+                    PhaseTypography(
+                        "Cammina",
+                        preferences.walkSeconds,
+                        (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PhaseShape(
-    shape: Shape,
-    containerColor: Color,
-    contentColor: Color,
-    shapeTag: String,
-    contentTag: String,
-    modifier: Modifier = Modifier,
+private fun PhaseBackdrop(shape: Shape, color: Color, tag: String, modifier: Modifier) {
+    Box(modifier.clip(shape).background(color).testTag(tag))
+}
+
+@Composable
+private fun PhaseContent(
+    color: Color,
+    tag: String,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     Box(
-        modifier = modifier
-            .clip(shape)
-            .background(containerColor)
-            .testTag(shapeTag)
-            .padding(24.dp),
+        modifier = modifier.padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
-            modifier = Modifier.testTag(contentTag),
+            modifier = Modifier.testTag(tag),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            CompositionLocalProvider(LocalContentColor provides contentColor, content = content)
+            CompositionLocalProvider(LocalContentColor provides color, content = content)
         }
     }
 }
