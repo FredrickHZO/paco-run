@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -29,7 +28,8 @@ import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.settings.RunPreferencesStore
 import dev.fred.pacorun.ui.AcquiringGpsScreen
 import dev.fred.pacorun.ui.ActiveRunScreen
-import dev.fred.pacorun.ui.SetupScreen
+import dev.fred.pacorun.ui.editor.RoutineEditorScreen
+import dev.fred.pacorun.ui.editor.RoutineEditorState
 import dev.fred.pacorun.ui.home.HomeScreen
 import dev.fred.pacorun.ui.home.HomeUiState
 import dev.fred.pacorun.ui.theme.PacoRunTheme
@@ -41,7 +41,8 @@ fun PacoRunApp() {
     val store = remember(context.applicationContext) { RunPreferencesStore(context.applicationContext) }
     val preferences by store.preferences.collectAsStateWithLifecycle(initialValue = RunPreferences())
     var editedPreferences by remember { mutableStateOf<RunPreferences?>(null) }
-    var editing by remember { mutableStateOf(false) }
+    var editorOriginal by remember { mutableStateOf<RunPreferences?>(null) }
+    var editorDraft by remember { mutableStateOf<RunPreferences?>(null) }
     val displayedPreferences = editedPreferences ?: preferences
     LaunchedEffect(preferences) {
         if (editedPreferences == preferences) editedPreferences = null
@@ -87,25 +88,38 @@ fun PacoRunApp() {
 
     PacoRunTheme(dynamicColor = displayedPreferences.dynamicColor) {
         when (val current = session) {
-            RunSessionState.Idle -> if (editing) {
-                BackHandler { editing = false }
-                SetupScreen(
-                    preferences = displayedPreferences,
-                    onPreferencesChange = { updated ->
-                        editedPreferences = updated
-                        scope.launch { store.update { updated } }
-                    },
-                )
-            } else {
-                HomeScreen(
-                    state = HomeUiState(displayedPreferences, readiness),
-                    onStart = requestStart,
-                    onEdit = { editing = true },
-                    onModeChange = { mode ->
-                        editedPreferences = displayedPreferences.copy(mode = mode)
-                        scope.launch { store.update { it.copy(mode = mode) } }
-                    },
-                )
+            RunSessionState.Idle -> {
+                val draft = editorDraft
+                val original = editorOriginal
+                if (draft != null && original != null) {
+                    RoutineEditorScreen(
+                        state = RoutineEditorState(original = original, draft = draft),
+                        onDraftChange = { editorDraft = it },
+                        onSave = {
+                            editedPreferences = draft
+                            scope.launch { store.update { draft } }
+                            editorDraft = null
+                            editorOriginal = null
+                        },
+                        onBack = {
+                            editorDraft = null
+                            editorOriginal = null
+                        },
+                    )
+                } else {
+                    HomeScreen(
+                        state = HomeUiState(displayedPreferences, readiness),
+                        onStart = requestStart,
+                        onEdit = {
+                            editorOriginal = displayedPreferences
+                            editorDraft = displayedPreferences
+                        },
+                        onModeChange = { mode ->
+                            editedPreferences = displayedPreferences.copy(mode = mode)
+                            scope.launch { store.update { it.copy(mode = mode) } }
+                        },
+                    )
+                }
             }
             RunSessionState.AcquiringGps -> AcquiringGpsScreen(onStop = stop)
             is RunSessionState.Running -> ActiveRunScreen(state = current, onStop = stop)

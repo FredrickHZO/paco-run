@@ -2,14 +2,8 @@ package dev.fred.pacorun.ui.home
 
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +36,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
@@ -52,8 +45,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -65,11 +58,9 @@ import dev.fred.pacorun.location.LocationReadiness
 import dev.fred.pacorun.settings.RoutineMode
 import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.ui.UiTags
+import dev.fred.pacorun.ui.components.AmbientShapeField
 import dev.fred.pacorun.ui.components.PacoRunScaffold
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -114,73 +105,6 @@ fun HomeScreen(
                 )
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun AmbientShapeField(lightScheme: Boolean) {
-    val transition = rememberInfiniteTransition(label = "ambient-home")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 18_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "ambient-phase",
-    )
-    val radians = phase * (PI.toFloat() / 180f)
-    val wave = sin(radians)
-    val crossingWave = cos(radians)
-    val colors = MaterialTheme.colorScheme
-    val primaryAlpha = if (lightScheme) 0.22f else 0.08f
-    val tertiaryAlpha = if (lightScheme) 0.20f else 0.07f
-    val upperPath = remember {
-        Morph(MaterialShapes.Oval, MaterialShapes.ClamShell).toPath(progress = 0f, startAngle = -90)
-    }
-    val lowerPath = MaterialShapes.ClamShell.toPath(startAngle = 24)
-    val upperBounds = upperPath.getBounds()
-    val lowerBounds = lowerPath.getBounds()
-
-    Canvas(Modifier.fillMaxSize().testTag("ambient-shape-field")) {
-        val upperWidth = 600.dp.toPx()
-        val upperHeight = 600.dp.toPx()
-        val lowerWidth = 600.dp.toPx()
-        val lowerHeight = 600.dp.toPx()
-        val driftX = 7.dp.toPx()
-        val driftY = 5.dp.toPx()
-        val upperCenterY = 90.dp.toPx()
-        val lowerDriftX = 6.dp.toPx()
-        val lowerCenterOffset = -100.dp.toPx()
-        fun drawAmbient(path: Path, bounds: androidx.compose.ui.geometry.Rect, width: Float, height: Float, center: Offset, degrees: Float, color: Color) {
-            val placedPath = Path().apply {
-                addPath(path)
-                transform(Matrix().apply { scale(width, height) })
-                translate(center - getBounds().center)
-            }
-            rotate(degrees, pivot = center) {
-                drawPath(placedPath, color)
-            }
-        }
-        drawAmbient(
-            upperPath,
-            upperBounds,
-            upperWidth,
-            upperHeight,
-            Offset(100.dp.toPx() + crossingWave * driftX, upperCenterY + wave * driftY),
-            0f,
-            colors.primaryContainer.copy(alpha = primaryAlpha),
-        )
-        drawAmbient(
-            lowerPath,
-            lowerBounds,
-            lowerWidth,
-            lowerHeight,
-            Offset(size.width - 80.dp.toPx() - crossingWave * lowerDriftX, size.height + lowerCenterOffset - wave * driftY),
-            0f,
-            colors.tertiaryContainer.copy(alpha = tertiaryAlpha),
-        )
     }
 }
 
@@ -312,7 +236,7 @@ private fun RoutineScene(preferences: RunPreferences) {
             Text(
                 "${preferences.initialConstantKm.number()} km iniziali · " +
                     if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.align(Alignment.TopCenter).offset(y = (-12).dp),
                 textAlign = TextAlign.Center,
             )
@@ -348,7 +272,7 @@ private fun RoutineScene(preferences: RunPreferences) {
                 if (preferences.mode == RoutineMode.CONSTANT) {
                     ConstantTypography(preferences.constantRange.label)
                 } else {
-                    PhaseTypography("Corri", preferences.runSeconds, preferences.runRange.label)
+                    PhaseTypography("Corsa", preferences.runSeconds, preferences.runRange.label)
                 }
             }
             if (walkRunVisible) {
@@ -358,7 +282,7 @@ private fun RoutineScene(preferences: RunPreferences) {
                     modifier = secondaryModifier,
                 ) {
                     PhaseTypography(
-                        "Cammina",
+                        "Camminata",
                         preferences.walkSeconds,
                         (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
                     )
@@ -396,7 +320,11 @@ private fun PhaseContent(
 
 @Composable
 private fun ConstantTypography(pace: String) {
-    Text("Andatura costante", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    Text(
+        "Andatura costante",
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        textAlign = TextAlign.Center,
+    )
     Text(
         pace,
         autoSize = TextAutoSize.StepBased(
@@ -404,7 +332,7 @@ private fun ConstantTypography(pace: String) {
             maxFontSize = MaterialTheme.typography.headlineLarge.fontSize,
             stepSize = 1.sp,
         ),
-        style = MaterialTheme.typography.headlineLarge,
+        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
         textAlign = TextAlign.Center,
         maxLines = 1,
         softWrap = false,
@@ -413,9 +341,35 @@ private fun ConstantTypography(pace: String) {
 
 @Composable
 private fun PhaseTypography(label: String, seconds: Int, pace: String) {
-    Text(label, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
-    Text(seconds.duration(), style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
-    Text(pace, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1)
+    Text(
+        label,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        textAlign = TextAlign.Center,
+    )
+    Text(
+        seconds.duration(),
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = 20.sp,
+            maxFontSize = MaterialTheme.typography.headlineLarge.fontSize,
+            stepSize = 1.sp,
+        ),
+        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+    )
+    Text(
+        pace,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = 12.sp,
+            maxFontSize = MaterialTheme.typography.bodyLarge.fontSize,
+            stepSize = 1.sp,
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+    )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
