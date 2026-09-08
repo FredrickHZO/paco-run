@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
@@ -50,6 +52,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
@@ -82,7 +85,7 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.surface)
+            .background(if (lightScheme) colors.surfaceContainerHigh else colors.surfaceContainer)
             .testTag("home-scene-background"),
     ) {
         AmbientShapeField(lightScheme)
@@ -122,7 +125,7 @@ private fun AmbientShapeField(lightScheme: Boolean) {
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 9_000, easing = LinearEasing),
+            animation = tween(durationMillis = 18_000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "ambient-phase",
@@ -131,59 +134,54 @@ private fun AmbientShapeField(lightScheme: Boolean) {
     val wave = sin(radians)
     val crossingWave = cos(radians)
     val colors = MaterialTheme.colorScheme
-    val primaryAlpha = if (lightScheme) 0.32f else 0.10f
-    val secondaryAlpha = if (lightScheme) 0.27f else 0.08f
-    val tertiaryAlpha = if (lightScheme) 0.25f else 0.08f
+    val primaryAlpha = if (lightScheme) 0.22f else 0.08f
+    val tertiaryAlpha = if (lightScheme) 0.20f else 0.07f
+    val upperPath = remember {
+        Morph(MaterialShapes.Oval, MaterialShapes.ClamShell).toPath(progress = 0f, startAngle = -90)
+    }
+    val lowerPath = MaterialShapes.ClamShell.toPath(startAngle = 24)
+    val upperBounds = upperPath.getBounds()
+    val lowerBounds = lowerPath.getBounds()
 
-    Box(Modifier.fillMaxSize().testTag("ambient-shape-field")) {
-        AmbientShape(
-            shape = MaterialShapes.Oval.toShape(startAngle = -18),
-            color = colors.primaryContainer.copy(alpha = primaryAlpha),
-            tag = "ambient-shape-upper",
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(x = (-82).dp, y = 28.dp)
-                .size(width = 430.dp, height = 310.dp)
-                .graphicsLayer {
-                    translationX = crossingWave * 18.dp.toPx()
-                    translationY = wave * 12.dp.toPx()
-                    rotationZ = wave * 5f
-                },
+    Canvas(Modifier.fillMaxSize().testTag("ambient-shape-field")) {
+        val upperWidth = 600.dp.toPx()
+        val upperHeight = 600.dp.toPx()
+        val lowerWidth = 600.dp.toPx()
+        val lowerHeight = 600.dp.toPx()
+        val driftX = 7.dp.toPx()
+        val driftY = 5.dp.toPx()
+        val upperCenterY = 90.dp.toPx()
+        val lowerDriftX = 6.dp.toPx()
+        val lowerCenterOffset = -100.dp.toPx()
+        fun drawAmbient(path: Path, bounds: androidx.compose.ui.geometry.Rect, width: Float, height: Float, center: Offset, degrees: Float, color: Color) {
+            val placedPath = Path().apply {
+                addPath(path)
+                transform(Matrix().apply { scale(width, height) })
+                translate(center - getBounds().center)
+            }
+            rotate(degrees, pivot = center) {
+                drawPath(placedPath, color)
+            }
+        }
+        drawAmbient(
+            upperPath,
+            upperBounds,
+            upperWidth,
+            upperHeight,
+            Offset(100.dp.toPx() + crossingWave * driftX, upperCenterY + wave * driftY),
+            0f,
+            colors.primaryContainer.copy(alpha = primaryAlpha),
         )
-        AmbientShape(
-            shape = MaterialShapes.ClamShell.toShape(startAngle = 32),
-            color = colors.secondaryContainer.copy(alpha = secondaryAlpha),
-            tag = "ambient-shape-middle",
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .offset(x = 118.dp, y = (-12).dp)
-                .size(390.dp)
-                .graphicsLayer {
-                    translationX = wave * (-14).dp.toPx()
-                    translationY = crossingWave * 22.dp.toPx()
-                    rotationZ = crossingWave * -4f
-                },
-        )
-        AmbientShape(
-            shape = MaterialShapes.Puffy.toShape(startAngle = -12),
-            color = colors.tertiaryContainer.copy(alpha = tertiaryAlpha),
-            tag = "ambient-shape-lower",
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(x = (-68).dp, y = 108.dp)
-                .size(460.dp)
-                .graphicsLayer {
-                    translationX = crossingWave * (-20).dp.toPx()
-                    translationY = wave * (-16).dp.toPx()
-                    rotationZ = wave * -3f
-                },
+        drawAmbient(
+            lowerPath,
+            lowerBounds,
+            lowerWidth,
+            lowerHeight,
+            Offset(size.width - 80.dp.toPx() - crossingWave * lowerDriftX, size.height + lowerCenterOffset - wave * driftY),
+            0f,
+            colors.tertiaryContainer.copy(alpha = tertiaryAlpha),
         )
     }
-}
-
-@Composable
-private fun AmbientShape(shape: Shape, color: Color, tag: String, modifier: Modifier) {
-    Box(modifier.clip(shape).background(color).testTag(tag))
 }
 
 @Composable
@@ -263,23 +261,23 @@ private fun RoutineScene(preferences: RunPreferences) {
     val primarySize by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-size",
-    ) { if (it == RoutineMode.CONSTANT) 320.dp else 214.dp }
+    ) { if (it == RoutineMode.CONSTANT) 320.dp else 222.dp }
     val primaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-56).dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else (-78).dp }
     val primaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "primary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-34).dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else (-52).dp }
     val secondaryX by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-x",
-    ) { if (it == RoutineMode.CONSTANT) 0.dp else 57.dp }
+    ) { if (it == RoutineMode.CONSTANT) 0.dp else 78.dp }
     val secondaryY by transition.animateDp(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-y",
-    ) { if (it == RoutineMode.CONSTANT) 8.dp else 44.dp }
+    ) { if (it == RoutineMode.CONSTANT) 8.dp else 52.dp }
     val secondaryScale by transition.animateFloat(
         transitionSpec = { motionScheme.defaultSpatialSpec() },
         label = "secondary-shape-scale",
@@ -295,7 +293,7 @@ private fun RoutineScene(preferences: RunPreferences) {
         transition.targetState == RoutineMode.WALK_RUN
     val primaryModifier = Modifier.size(primarySize).offset(primaryX, primaryY)
     val secondaryModifier = Modifier
-        .size(216.dp)
+        .size(224.dp)
         .offset(secondaryX, secondaryY)
         .graphicsLayer {
             alpha = secondaryAlpha
@@ -315,7 +313,7 @@ private fun RoutineScene(preferences: RunPreferences) {
                 "${preferences.initialConstantKm.number()} km iniziali · " +
                     if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.TopCenter),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-12).dp),
                 textAlign = TextAlign.Center,
             )
         }
