@@ -30,7 +30,6 @@ fun DistanceControl(
     tag: String,
     roleColor: Color,
     roleOnColor: Color,
-    allowZero: Boolean,
     onChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -60,9 +59,8 @@ fun DistanceControl(
             title = "$label (km)",
             initialRaw = Math.round(km * 10f).toLong().coerceAtLeast(0L),
             format = { raw -> "${raw / 10},${raw % 10} km" },
-            isValid = { raw -> if (allowZero) raw >= 0 else raw > 0 },
             roleColor = roleColor,
-            onConfirm = { raw -> onChange(raw / 10f) },
+            onValueChange = { raw -> onChange(raw / 10f) },
             onDismiss = { showKeypad = false },
         )
     }

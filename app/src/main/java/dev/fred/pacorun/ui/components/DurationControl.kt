@@ -73,9 +73,8 @@ fun DurationControl(
             title = label,
             initialRaw = minutes * 100L + seconds,
             format = { raw -> durationLabel(raw / 100, raw % 100) },
-            isValid = { raw -> durationTotal(raw / 100, raw % 100) != null },
             roleColor = roleColor,
-            onConfirm = { raw -> durationTotal(raw / 100, raw % 100)?.let(onTotalSecondsChange) },
+            onValueChange = { raw -> durationTotal(raw / 100, raw % 100)?.let(onTotalSecondsChange) },
             onDismiss = { showKeypad = false },
         )
     }

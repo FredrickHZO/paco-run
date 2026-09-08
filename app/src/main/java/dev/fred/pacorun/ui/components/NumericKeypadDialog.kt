@@ -43,12 +43,15 @@ fun NumericKeypadDialog(
     title: String,
     initialRaw: Long,
     format: (Long) -> String,
-    isValid: (Long) -> Boolean,
     roleColor: Color,
-    onConfirm: (Long) -> Unit,
+    onValueChange: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var raw by remember { mutableLongStateOf(initialRaw) }
+    fun apply(newRaw: Long) {
+        raw = newRaw
+        onValueChange(newRaw)
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -62,7 +65,7 @@ fun NumericKeypadDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Start) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Annulla") }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Chiudi") }
                 }
                 Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
@@ -78,19 +81,20 @@ fun NumericKeypadDialog(
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             row.forEach { key ->
                                 KeypadKey(key, roleColor) {
-                                    raw = when (key) {
-                                        "⌫" -> raw / 10
-                                        "00" -> raw * 100
-                                        else -> raw * 10 + key.toLong()
-                                    }
+                                    apply(
+                                        when (key) {
+                                            "⌫" -> raw / 10
+                                            "00" -> raw * 100
+                                            else -> raw * 10 + key.toLong()
+                                        },
+                                    )
                                 }
                             }
                         }
                     }
                 }
                 Button(
-                    onClick = { onConfirm(raw); onDismiss() },
-                    enabled = isValid(raw),
+                    onClick = onDismiss,
                     shapes = ButtonDefaults.shapesFor(ButtonDefaults.MediumContainerHeight),
                     contentPadding = ButtonDefaults.contentPaddingFor(ButtonDefaults.MediumContainerHeight),
                     modifier = Modifier
@@ -98,7 +102,7 @@ fun NumericKeypadDialog(
                         .heightIn(min = ButtonDefaults.MediumContainerHeight)
                         .padding(top = 24.dp, bottom = 16.dp)
                         .testTag("keypad-confirm"),
-                ) { Text("OK", style = ButtonDefaults.textStyleFor(ButtonDefaults.MediumContainerHeight)) }
+                ) { Text("Fatto", style = ButtonDefaults.textStyleFor(ButtonDefaults.MediumContainerHeight)) }
             }
         }
     }

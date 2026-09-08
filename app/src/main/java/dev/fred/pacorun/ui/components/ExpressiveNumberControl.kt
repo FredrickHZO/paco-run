@@ -73,9 +73,8 @@ private fun SpeedValueCard(hint: String, value: Float, tag: String, roleColor: C
             title = "$hint (km/h)",
             initialRaw = Math.round(value * 10f).toLong().coerceAtLeast(0L),
             format = { raw -> "${(raw / 10)},${raw % 10} km/h" },
-            isValid = { raw -> raw > 0 },
             roleColor = roleColor,
-            onConfirm = { raw -> onChange(raw / 10f) },
+            onValueChange = { raw -> onChange(raw / 10f) },
             onDismiss = { showKeypad = false },
         )
     }

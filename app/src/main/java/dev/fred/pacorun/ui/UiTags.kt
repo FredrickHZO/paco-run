@@ -25,8 +25,6 @@ object UiTags {
     const val gpsCues = "gps-cues"
     const val cueVolume = "cue-volume"
     const val saveRoutine = "save-routine"
-    const val discardDialogContinue = "discard-dialog-continue"
-    const val discardDialogDiscard = "discard-dialog-discard"
 
     const val activePhase = "active-phase"
     const val activeSpeed = "active-speed"
