@@ -42,7 +42,7 @@ class RunSessionService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var notificationManager: NotificationManager
     private var cuePlayer: CuePlayer? = null
-    private var coordinator: SessionCoordinator? = null
+    private var coordinator: PendingSessionCoordinator? = null
     private var locationRequested = false
     private var starting = false
     private var sessionToken = 0L
@@ -113,15 +113,13 @@ class RunSessionService : Service() {
     }
 
     private fun beginTracking(preferences: RunPreferences) {
-        val startedAt = SystemClock.elapsedRealtime()
         cuePlayer = CuePlayer(this)
-        coordinator = SessionCoordinator(
+        coordinator = PendingSessionCoordinator(
             preferences = preferences,
             routineEngine = RoutineEngineAdapter(RoutineEngine(preferences)),
             paceEvaluator = PaceEvaluatorAdapter(PaceEvaluator(preferences.paceConfig())),
             onCues = { cues, volume -> cuePlayer?.enqueue(cues, volume) },
             publish = ::publish,
-            startedAtElapsedMillis = startedAt,
         )
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE

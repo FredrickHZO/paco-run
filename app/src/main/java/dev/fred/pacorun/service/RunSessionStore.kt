@@ -243,6 +243,43 @@ class SessionCoordinator(
     }
 }
 
+class PendingSessionCoordinator(
+    private val preferences: RunPreferences,
+    private val routineEngine: SessionRoutineEngine,
+    private val paceEvaluator: SessionPaceEvaluator,
+    private val onCues: (List<AudioCue>, Float) -> Unit,
+    private val publish: (RunSessionState) -> Unit,
+) {
+    private var activeCoordinator: SessionCoordinator? = null
+
+    val isActivated: Boolean get() = activeCoordinator != null
+
+    fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
+        val coordinator = activeCoordinator
+        if (coordinator != null) {
+            coordinator.tick(elapsedRealtimeMillis, sample, position)
+            return
+        }
+        if (sample?.reliable == true && position != null) {
+            activate(sample.elapsedRealtimeMillis).tick(sample.elapsedRealtimeMillis, sample, position)
+        }
+    }
+
+    fun advanceTimer(elapsedRealtimeMillis: Long, signalGpsOutage: Boolean) {
+        activeCoordinator?.advanceTimer(elapsedRealtimeMillis, signalGpsOutage)
+    }
+
+    private fun activate(startedAtElapsedMillis: Long): SessionCoordinator =
+        SessionCoordinator(
+            preferences = preferences,
+            routineEngine = routineEngine,
+            paceEvaluator = paceEvaluator,
+            onCues = onCues,
+            publish = publish,
+            startedAtElapsedMillis = startedAtElapsedMillis,
+        ).also { activeCoordinator = it }
+}
+
 class RoutineEngineAdapter(private val engine: RoutineEngine) : SessionRoutineEngine {
     override fun accept(input: RoutineInput) = engine.accept(input)
 }

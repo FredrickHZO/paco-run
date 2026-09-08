@@ -245,6 +245,82 @@ class SessionCoordinatorTest {
     private fun reliableSample(speedKmh: Float, time: Long) = LocationSample(speedKmh, .2f, true, time)
     private fun unreliableSample(time: Long) = LocationSample(0f, null, false, time)
 
+    @Test
+    fun timerAndRoutineDoNotAdvanceBeforeFirstReliableFix() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val published = mutableListOf<RunSessionState>()
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+        )
+
+        pending.advanceTimer(10_000L, signalGpsOutage = true)
+
+        assertTrue(published.isEmpty())
+        assertTrue(routine.inputs.isEmpty())
+        assertFalse(pending.isActivated)
+    }
+
+    @Test
+    fun unreliableSampleWhileAcquiringDoesNotActivate() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val published = mutableListOf<RunSessionState>()
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GPS_WEAK, null, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+        )
+
+        pending.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, 0.0, 1_000L))
+
+        assertTrue(published.isEmpty())
+        assertTrue(routine.inputs.isEmpty())
+        assertFalse(pending.isActivated)
+    }
+
+    @Test
+    fun firstReliableFixActivatesAndStartsAtZeroWithoutAddingDistance() {
+        val published = mutableListOf<RunSessionState>()
+        val preferences = RunPreferences()
+        val pending = PendingSessionCoordinator(
+            preferences = preferences,
+            routineEngine = RoutineEngineAdapter(dev.fred.pacorun.routine.RoutineEngine(preferences)),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+        )
+
+        pending.tick(12_000L, reliableSample(8f, 12_000L), LocationPosition(0.0, 0.0, 12_000L))
+
+        assertTrue(pending.isActivated)
+        val running = published.last() as RunSessionState.Running
+        assertEquals(0L, running.elapsedMillis)
+        assertEquals(0.0, running.totalDistanceMeters, 0.0)
+    }
+
+    @Test
+    fun onceActivatedLaterTicksDelegateToTheSameCoordinator() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+        )
+
+        pending.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        pending.advanceTimer(1_000L, signalGpsOutage = false)
+
+        assertTrue(pending.isActivated)
+        assertEquals(2, routine.inputs.size)
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,
