@@ -12,6 +12,7 @@ import dev.fred.pacorun.routine.RoutineInput
 import dev.fred.pacorun.routine.RoutinePhase
 import dev.fred.pacorun.routine.RoutineResult
 import dev.fred.pacorun.settings.RunPreferences
+import dev.fred.pacorun.settings.SpeedRange
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +35,7 @@ sealed interface RunSessionState {
         val intervalRemainingMillis: Long?,
         val totalDistanceMeters: Double,
         val routineDistanceMeters: Double,
+        val activeRange: SpeedRange,
     ) : RunSessionState
 }
 
@@ -226,6 +228,7 @@ class SessionCoordinator(
                 intervalRemainingMillis = routine.intervalRemainingMillis,
                 totalDistanceMeters = routine.totalDistanceMeters,
                 routineDistanceMeters = routine.routineDistanceMeters,
+                activeRange = routine.activeRange,
             ),
         )
     }

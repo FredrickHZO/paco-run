@@ -217,6 +217,7 @@ class SessionCoordinatorTest {
         val state = published.last() as RunSessionState.Running
         assertTrue(state.gpsReliable)
         assertEquals(11f, state.speedKmh)
+        assertEquals(SpeedRange(4f, 5f), state.activeRange)
     }
 
     @Test
