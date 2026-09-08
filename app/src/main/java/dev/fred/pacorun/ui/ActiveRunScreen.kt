@@ -38,20 +38,6 @@ fun ActiveRunScreen(state: RunSessionState.Running, onStop: () -> Unit) {
     }
 }
 
-@Composable
-fun AcquiringGpsScreen(onStop: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.systemBars)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Acquisizione GPS")
-        Button(onClick = onStop, modifier = Modifier.fillMaxWidth().testTag(UiTags.stop)) { Text("Termina") }
-    }
-}
-
 private fun durationText(milliseconds: Long): String {
     val seconds = (milliseconds.coerceAtLeast(0L) + 999L) / 1_000L
     return "%d:%02d".format(Locale.ROOT, seconds / 60L, seconds % 60L)

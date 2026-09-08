@@ -16,6 +16,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -26,9 +28,9 @@ import dev.fred.pacorun.service.RunSessionState
 import dev.fred.pacorun.service.RunSessionStore
 import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.settings.RunPreferencesStore
-import dev.fred.pacorun.ui.AcquiringGpsScreen
 import dev.fred.pacorun.ui.ActiveRunScreen
 import dev.fred.pacorun.ui.editor.RoutineEditorScreen
+import dev.fred.pacorun.ui.gps.GpsAcquisitionScreen
 import dev.fred.pacorun.ui.home.HomeScreen
 import dev.fred.pacorun.ui.home.HomeUiState
 import dev.fred.pacorun.ui.theme.PacoRunTheme
@@ -46,6 +48,14 @@ fun PacoRunApp() {
         if (editedPreferences == preferences) editedPreferences = null
     }
     val session by RunSessionStore.state.collectAsStateWithLifecycle()
+    val haptics = LocalHapticFeedback.current
+    var wasAcquiringGps by remember { mutableStateOf(false) }
+    LaunchedEffect(session) {
+        if (session is RunSessionState.Running && wasAcquiringGps) {
+            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+        }
+        wasAcquiringGps = session == RunSessionState.AcquiringGps
+    }
     val scope = rememberCoroutineScope()
     var readinessRefresh by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -106,7 +116,7 @@ fun PacoRunApp() {
                     },
                 )
             }
-            RunSessionState.AcquiringGps -> AcquiringGpsScreen(onStop = stop)
+            RunSessionState.AcquiringGps -> GpsAcquisitionScreen(onCancel = stop)
             is RunSessionState.Running -> ActiveRunScreen(state = current, onStop = stop)
         }
     }

@@ -33,4 +33,5 @@ object UiTags {
     const val activeRoutineDistance = "active-routine-distance"
     const val activeGps = "active-gps"
     const val stop = "stop"
+    const val gpsProgress = "gps-progress"
 }
