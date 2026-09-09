@@ -46,20 +46,15 @@ class RoutineEngine(private val preferences: RunPreferences) {
         }
 
         if (phase == RoutinePhase.RUN || phase == RoutinePhase.WALK) {
-            if (!preferences.routineUnlimited && routineDistanceMeters >= kmToMeters(preferences.routineKm)) {
-                finishRoutine(reliableSpeed(input), cues)
+            val transitions = advanceTo(input.elapsedRealtimeMillis)
+            if (transitions > 0) {
+                cues += phaseCue()
+                directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
                 profileChanged = true
+                if (transitions == 1 && durationMillis() <= 3_000L) cues += timingCues(input.elapsedRealtimeMillis)
+                else lastTimingCheckMillis = input.elapsedRealtimeMillis
             } else {
-                val transitions = advanceTo(input.elapsedRealtimeMillis)
-                if (transitions > 0) {
-                    cues += phaseCue()
-                    directionCue(reliableSpeed(input), activeRange())?.let(cues::add)
-                    profileChanged = true
-                    if (transitions == 1 && durationMillis() <= 3_000L) cues += timingCues(input.elapsedRealtimeMillis)
-                    else lastTimingCheckMillis = input.elapsedRealtimeMillis
-                } else {
-                    cues += timingCues(input.elapsedRealtimeMillis)
-                }
+                cues += timingCues(input.elapsedRealtimeMillis)
             }
         }
 
@@ -71,13 +66,6 @@ class RoutineEngine(private val preferences: RunPreferences) {
         intervalStartedAtMillis = now
         resetIntervalCues()
         cues += phaseCue()
-        directionCue(speed, activeRange())?.let(cues::add)
-    }
-
-    private fun finishRoutine(speed: Float?, cues: MutableList<RoutineCue>) {
-        phase = RoutinePhase.CONSTANT_AFTER
-        cues.clear()
-        cues += RoutineCue.ROUTINE_END
         directionCue(speed, activeRange())?.let(cues::add)
     }
 

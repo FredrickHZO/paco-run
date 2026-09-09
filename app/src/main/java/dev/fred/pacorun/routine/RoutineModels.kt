@@ -2,11 +2,11 @@ package dev.fred.pacorun.routine
 
 import dev.fred.pacorun.settings.SpeedRange
 
-enum class RoutinePhase { CONSTANT, CONSTANT_BEFORE, RUN, WALK, CONSTANT_AFTER }
+enum class RoutinePhase { CONSTANT, CONSTANT_BEFORE, RUN, WALK }
 
 enum class RoutineCue {
     ROUTINE_START, RUN_IN_TEN, WALK_IN_TEN,
-    COUNTDOWN_BEEP, RUN_ROUTINE, WALK_ROUTINE, ROUTINE_END,
+    COUNTDOWN_BEEP, RUN_ROUTINE, WALK_ROUTINE,
     SPEED_UP, SLOW_DOWN,
 }
 

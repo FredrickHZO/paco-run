@@ -9,7 +9,7 @@ enum class HeroKind { SPEED, RUN_COUNTDOWN, WALK_COUNTDOWN }
 fun heroKind(phase: RoutinePhase): HeroKind = when (phase) {
     RoutinePhase.RUN -> HeroKind.RUN_COUNTDOWN
     RoutinePhase.WALK -> HeroKind.WALK_COUNTDOWN
-    RoutinePhase.CONSTANT, RoutinePhase.CONSTANT_BEFORE, RoutinePhase.CONSTANT_AFTER -> HeroKind.SPEED
+    RoutinePhase.CONSTANT, RoutinePhase.CONSTANT_BEFORE -> HeroKind.SPEED
 }
 
 private const val URGENCY_WINDOW_MILLIS = 10_000L

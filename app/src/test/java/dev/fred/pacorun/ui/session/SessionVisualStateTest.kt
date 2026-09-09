@@ -16,7 +16,6 @@ class SessionVisualStateTest {
     fun constantPhasesUseSpeedHero() {
         assertEquals(HeroKind.SPEED, heroKind(RoutinePhase.CONSTANT))
         assertEquals(HeroKind.SPEED, heroKind(RoutinePhase.CONSTANT_BEFORE))
-        assertEquals(HeroKind.SPEED, heroKind(RoutinePhase.CONSTANT_AFTER))
     }
 
     @Test

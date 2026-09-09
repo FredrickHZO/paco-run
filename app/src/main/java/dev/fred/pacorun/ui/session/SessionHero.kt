@@ -210,7 +210,7 @@ private fun onColorFor(kind: HeroKind, colors: androidx.compose.material3.ColorS
 private fun phaseTitle(phase: RoutinePhase): String = when (phase) {
     RoutinePhase.RUN -> "Corsa"
     RoutinePhase.WALK -> "Camminata"
-    RoutinePhase.CONSTANT, RoutinePhase.CONSTANT_BEFORE, RoutinePhase.CONSTANT_AFTER -> "Costante"
+    RoutinePhase.CONSTANT, RoutinePhase.CONSTANT_BEFORE -> "Costante"
 }
 
 private fun Float.decimal() = String.format(Locale.ITALY, "%.1f", this)

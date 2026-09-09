@@ -51,7 +51,7 @@ class RoutineEngineTest {
 
     @Test
     fun warmupCrossingCreditsOnlyPostBoundaryDistanceToRoutine() {
-        val engine = RoutineEngine(preferences(warmupKm = .001f, unlimited = false, routineKm = .01f))
+        val engine = RoutineEngine(preferences(warmupKm = .001f))
 
         engine.accept(input(time = 0L, distance = .75))
         val result = engine.accept(input(time = 1_000L, distance = .5))
@@ -60,19 +60,6 @@ class RoutineEngineTest {
         assertEquals(1.25, result.totalDistanceMeters, .001)
         assertEquals(.25, result.routineDistanceMeters, .001)
         assertEquals(listOf(RoutineCue.ROUTINE_START), result.cues)
-    }
-
-    @Test
-    fun warmupCrossingThatAlsoEndsLimitedRoutineEmitsOnlyRoutineEndThenDirection() {
-        val engine = RoutineEngine(preferences(warmupKm = .001f, unlimited = false, routineKm = .0005f))
-
-        val result = engine.accept(input(time = 0L, distance = 1.5, speed = 6f))
-
-        assertEquals(RoutinePhase.CONSTANT_AFTER, result.phase)
-        assertEquals(1.5, result.totalDistanceMeters, .001)
-        assertEquals(.5, result.routineDistanceMeters, .001)
-        assertEquals(listOf(RoutineCue.ROUTINE_END, RoutineCue.SPEED_UP), result.cues)
-        assertTrue(result.profileChanged)
     }
 
     @Test
@@ -184,32 +171,6 @@ class RoutineEngineTest {
     }
 
     @Test
-    fun unlimitedRoutineNeverEntersConstantAfter() {
-        val engine = RoutineEngine(preferences(runSeconds = 5, walkSeconds = 5, unlimited = true))
-
-        engine.accept(input(time = 0L))
-        val result = engine.accept(input(time = 25_000L, distance = 10_000.0))
-
-        assertEquals(RoutinePhase.WALK, result.phase)
-        assertEquals(listOf(RoutineCue.WALK_ROUTINE), result.cues)
-        assertEquals(10_000.0, result.routineDistanceMeters, .001)
-    }
-
-    @Test
-    fun limitedRoutineEndsImmediatelyMidInterval() {
-        val engine = RoutineEngine(preferences(unlimited = false, routineKm = .01f))
-
-        engine.accept(input(time = 0L))
-        val result = engine.accept(input(time = 1_000L, distance = 10.0))
-
-        assertEquals(RoutinePhase.CONSTANT_AFTER, result.phase)
-        assertNull(result.intervalRemainingMillis)
-        assertEquals(10.0, result.routineDistanceMeters, .001)
-        assertEquals(listOf(RoutineCue.ROUTINE_END), result.cues)
-        assertTrue(result.profileChanged)
-    }
-
-    @Test
     fun weakGpsAdvancesTimerButNotDistance() {
         val engine = RoutineEngine(preferences(runSeconds = 5))
 
@@ -253,8 +214,6 @@ class RoutineEngineTest {
         runSeconds: Int = 20,
         walkSeconds: Int = 30,
         walkUsesConstantRange: Boolean = false,
-        unlimited: Boolean = true,
-        routineKm: Float = 5f,
     ) = RunPreferences(
         mode = RoutineMode.WALK_RUN,
         constantRange = SpeedRange(7f, 8f),
@@ -264,8 +223,6 @@ class RoutineEngineTest {
         initialConstantKm = warmupKm,
         runSeconds = runSeconds,
         walkSeconds = walkSeconds,
-        routineUnlimited = unlimited,
-        routineKm = routineKm,
     )
 
     private fun input(
