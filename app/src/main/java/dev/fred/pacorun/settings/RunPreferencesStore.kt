@@ -71,8 +71,6 @@ class RunPreferencesStore(private val context: Context) {
             initialConstantKm = values[Keys.initialConstantKm] ?: defaults.initialConstantKm,
             runSeconds = values[Keys.runSeconds] ?: defaults.runSeconds,
             walkSeconds = values[Keys.walkSeconds] ?: defaults.walkSeconds,
-            routineUnlimited = values[Keys.routineUnlimited] ?: defaults.routineUnlimited,
-            routineKm = values[Keys.routineKm] ?: defaults.routineKm,
             confirmationSamples = values[Keys.confirmationSamples] ?: defaults.confirmationSamples,
             repeatMillis = values[Keys.repeatMillis] ?: defaults.repeatMillis,
             gpsCuesEnabled = values[Keys.gpsCuesEnabled] ?: defaults.gpsCuesEnabled,
@@ -93,8 +91,6 @@ class RunPreferencesStore(private val context: Context) {
         values[Keys.initialConstantKm] = preferences.initialConstantKm
         values[Keys.runSeconds] = preferences.runSeconds
         values[Keys.walkSeconds] = preferences.walkSeconds
-        values[Keys.routineUnlimited] = preferences.routineUnlimited
-        values[Keys.routineKm] = preferences.routineKm
         values[Keys.minKmh] = preferences.constantRange.minKmh
         values[Keys.maxKmh] = preferences.constantRange.maxKmh
         values[Keys.confirmationSamples] = preferences.confirmationSamples
@@ -116,8 +112,6 @@ class RunPreferencesStore(private val context: Context) {
         val initialConstantKm = floatPreferencesKey("initial_constant_km")
         val runSeconds = intPreferencesKey("run_seconds")
         val walkSeconds = intPreferencesKey("walk_seconds")
-        val routineUnlimited = booleanPreferencesKey("routine_unlimited")
-        val routineKm = floatPreferencesKey("routine_km")
         val minKmh = floatPreferencesKey("min_kmh")
         val maxKmh = floatPreferencesKey("max_kmh")
         val confirmationSamples = intPreferencesKey("confirmation_samples")

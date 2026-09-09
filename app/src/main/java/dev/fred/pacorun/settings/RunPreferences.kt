@@ -16,8 +16,6 @@ data class RunPreferences(
     val initialConstantKm: Float = 0f,
     val runSeconds: Int = 60,
     val walkSeconds: Int = 120,
-    val routineUnlimited: Boolean = true,
-    val routineKm: Float = 5f,
     val confirmationSamples: Int = 2,
     val repeatMillis: Long = 5_000L,
     val gpsCuesEnabled: Boolean = false,
@@ -36,7 +34,6 @@ data class RunPreferences(
                 initialConstantKm.isFinite() &&
                 initialConstantKm >= 0f &&
                 runSeconds > 0 &&
-                walkSeconds > 0 &&
-                (routineUnlimited || (routineKm.isFinite() && routineKm > 0f))
+                walkSeconds > 0
         }
 }
