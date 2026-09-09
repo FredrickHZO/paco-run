@@ -104,7 +104,6 @@ fun RoutineEditorScreen(
                     InitialConstantSection(preferences.initialConstantKm) { onPreferencesChange(preferences.copy(initialConstantKm = it)) }
                     RunSection(preferences, onPreferencesChange)
                     WalkSection(preferences, onPreferencesChange)
-                    RoutineEndSection(preferences, onPreferencesChange)
                 }
 
                 VoiceGpsSection(preferences, onPreferencesChange)
@@ -134,7 +133,7 @@ private fun ConstantSection(preferences: RunPreferences, onRangeChange: (dev.fre
 private fun InitialConstantSection(initialConstantKm: Float, onChange: (Float) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Costante iniziale", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = colors.secondary)
+        Text("Riscaldamento", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = colors.secondary)
         DistanceControl(
             label = "Distanza",
             km = initialConstantKm,
@@ -205,56 +204,16 @@ private fun WalkSection(preferences: RunPreferences, onPreferencesChange: (RunPr
 }
 
 @Composable
-private fun RoutineEndSection(preferences: RunPreferences, onPreferencesChange: (RunPreferences) -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Fine routine", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = colors.secondary)
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ToggleRow(
-                label = "Senza fine",
-                checked = preferences.routineUnlimited,
-                color = colors.secondary,
-                tag = UiTags.routineUnlimited,
-            ) { onPreferencesChange(preferences.copy(routineUnlimited = it)) }
-            Text(
-                "Con una distanza impostata, superato il limite la corsa si ferma e si continua a camminare all'andatura scelta.",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.secondary.copy(alpha = 0.75f),
-            )
-        }
-        AnimatedVisibility(!preferences.routineUnlimited) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DistanceControl(
-                    label = "Distanza",
-                    km = preferences.routineKm,
-                    tag = UiTags.routineDistance,
-                    roleColor = colors.secondary,
-                    roleOnColor = colors.onSecondary,
-                    onChange = { onPreferencesChange(preferences.copy(routineKm = it)) },
-                )
-                if (!preferences.routineKm.isFinite() || preferences.routineKm <= 0f) {
-                    Text(
-                        "La distanza routine deve essere positiva.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.error,
-                        modifier = Modifier.testTag(UiTags.routineDistanceError),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun VoiceGpsSection(preferences: RunPreferences, onPreferencesChange: (RunPreferences) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Voce e GPS", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold), color = colors.secondary)
         ToggleRow(
-            label = "Avvisi GPS",
+            label = "Avvisi vocali GPS",
             checked = preferences.gpsCuesEnabled,
             color = colors.secondary,
             tag = UiTags.gpsCues,
+            description = "Un avviso a voce quando il segnale GPS peggiora o torna stabile durante l'attività.",
         ) { onPreferencesChange(preferences.copy(gpsCuesEnabled = it)) }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -277,20 +236,32 @@ private fun VoiceGpsSection(preferences: RunPreferences, onPreferencesChange: (R
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, color: Color, tag: String, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .semantics(mergeDescendants = true) {
-                role = Role.Switch
-                stateDescription = if (checked) "Attivo" else "Disattivo"
-            },
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    color: Color,
+    tag: String,
+    description: String? = null,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .semantics(mergeDescendants = true) {
+                    role = Role.Switch
+                    stateDescription = if (checked) "Attivo" else "Disattivo"
+                },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+        if (description != null) {
+            Text(description, color = color.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

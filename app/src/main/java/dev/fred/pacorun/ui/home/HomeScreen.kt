@@ -215,6 +215,10 @@ private fun RoutineScene(preferences: RunPreferences) {
     val secondaryShape = MaterialShapes.ClamShell.toShape(startAngle = 24)
     val walkRunVisible = transition.currentState == RoutineMode.WALK_RUN ||
         transition.targetState == RoutineMode.WALK_RUN
+    // Unlike walkRunVisible above (which stays true for the whole morph so the secondary shape
+    // can fade out), the label must vanish the instant "Costante" is picked, not when the morph
+    // finishes -- so it tracks targetState alone.
+    val warmupLabelVisible = transition.targetState == RoutineMode.WALK_RUN
     val primaryModifier = Modifier.size(primarySize).offset(primaryX, primaryY)
     val secondaryModifier = Modifier
         .size(224.dp)
@@ -232,10 +236,13 @@ private fun RoutineScene(preferences: RunPreferences) {
             .testTag(if (preferences.mode == RoutineMode.CONSTANT) "constant-scene" else "walk-run-scene"),
         contentAlignment = Alignment.Center,
     ) {
-        if (walkRunVisible) {
+        if (warmupLabelVisible) {
             Text(
-                "${preferences.initialConstantKm.number()} km iniziali · " +
-                    if (preferences.routineUnlimited) "Senza fine" else "Fino a ${preferences.routineKm.number()} km",
+                if (preferences.initialConstantKm == 0f) {
+                    "Nessun riscaldamento"
+                } else {
+                    "${preferences.initialConstantKm.number()} km di riscaldamento"
+                },
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 modifier = Modifier.align(Alignment.TopCenter).offset(y = (-12).dp),
                 textAlign = TextAlign.Center,

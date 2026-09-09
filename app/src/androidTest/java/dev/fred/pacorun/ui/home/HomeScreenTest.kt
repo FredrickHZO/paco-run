@@ -48,7 +48,7 @@ class HomeScreenTest {
         composeRule.onNodeWithText("Cammina–Corri").assertExists()
         composeRule.onNodeWithText("1:00").assertExists()
         composeRule.onNodeWithText("2:00").assertExists()
-        composeRule.onNodeWithText("0 km iniziali · Senza fine").assertExists()
+        composeRule.onNodeWithText("Nessun riscaldamento").assertExists()
         composeRule.onNodeWithText("Volume", substring = true).assertDoesNotExist()
         val background = composeRule.onNodeWithTag("home-scene-background").getUnclippedBoundsInRoot()
         val ambient = composeRule.onNodeWithTag("ambient-shape-field").getUnclippedBoundsInRoot()
@@ -78,6 +78,36 @@ class HomeScreenTest {
         val startBounds = composeRule.onNodeWithTag(UiTags.start).getUnclippedBoundsInRoot()
         check(startBounds.top >= 500.dp)
         check(composeRule.onNodeWithTag(UiTags.editRoutine).getUnclippedBoundsInRoot().top >= startBounds.bottom)
+    }
+
+    @Test
+    fun walkRunHomeDescribesANonZeroWarmupInKm() {
+        show(
+            HomeUiState(
+                RunPreferences(mode = RoutineMode.WALK_RUN, initialConstantKm = 2.5f),
+                LocationReadiness.READY,
+            ),
+        )
+
+        composeRule.onNodeWithText("2,5 km di riscaldamento").assertExists()
+    }
+
+    @Test
+    fun warmupLabelDisappearsAsSoonAsConstantIsChosenNotAfterTheMorphFinishes() {
+        val state = mutableStateOf(HomeUiState(RunPreferences(mode = RoutineMode.WALK_RUN), LocationReadiness.READY))
+        composeRule.mainClock.autoAdvance = false
+        composeRule.setContent {
+            PacoRunTheme(dynamicColor = false) { HomeScreen(state.value, {}, {}, {}) }
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.onNodeWithText("Nessun riscaldamento").assertExists()
+
+        composeRule.runOnIdle {
+            state.value = state.value.copy(preferences = state.value.preferences.copy(mode = RoutineMode.CONSTANT))
+        }
+        // Only one frame ticks -- the morph is still mid-animation, not finished.
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.onNodeWithText("Nessun riscaldamento").assertDoesNotExist()
     }
 
     @Test
