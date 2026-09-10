@@ -91,27 +91,60 @@ data class LocationPosition(
     val latitude: Double,
     val longitude: Double,
     val elapsedRealtimeMillis: Long,
+    val horizontalAccuracyMeters: Float? = null,
 )
 
 class DistanceAccumulator(
     private val maxSpeedMetersPerSecond: Double = 15.0,
+    // Floor: even with excellent reported accuracy, don't trust movement below this as real
+    // (coordinate rounding / residual noise). 2m sits just under the ~3-5m combined-accuracy
+    // threshold the dynamic term below already produces in good GPS conditions.
+    private val minMovementMeters: Double = 2.0,
+    // Dynamic component: GPS jitter scales with the fix's own reported accuracy, so a fixed
+    // threshold either lets noise through in poor conditions or is overly strict in good ones.
+    // Half the combined accuracy of the two points is a standard "more likely real than noise"
+    // heuristic for roughly-Gaussian position error.
+    private val jitterAccuracyFraction: Double = 0.5,
 ) {
     private var anchor: LocationPosition? = null
+    // Last accepted raw fix, tracked separately from `anchor`: the anchor can stay frozen for
+    // many seconds while jitter-suppressed movement accrues, which would otherwise widen the
+    // impossible-jump budget below (proportional to elapsed time) far past what's physically
+    // sane for a single fix-to-fix gap. The sanity check always measures against this instead.
+    private var lastFix: LocationPosition? = null
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) return breakChain()
-        val previous = anchor ?: return 0.0.also { anchor = position }
-        val elapsedMillis = position.elapsedRealtimeMillis - previous.elapsedRealtimeMillis
-        val distance = haversineMeters(previous, position)
-        if (elapsedMillis <= 0L || !distance.isFinite() || distance > maxSpeedMetersPerSecond * elapsedMillis / 1_000.0) {
-            anchor = null
+        val previousAnchor = anchor
+        val previousFix = lastFix
+        if (previousAnchor == null || previousFix == null) {
+            anchor = position
+            lastFix = position
             return 0.0
         }
+        val fixElapsedMillis = position.elapsedRealtimeMillis - previousFix.elapsedRealtimeMillis
+        val fixDistance = haversineMeters(previousFix, position)
+        if (fixElapsedMillis <= 0L || !fixDistance.isFinite() || fixDistance > maxSpeedMetersPerSecond * fixElapsedMillis / 1_000.0) {
+            anchor = null
+            lastFix = null
+            return 0.0
+        }
+        lastFix = position
+        // Below the jitter threshold: leave the anchor where it is, so noise oscillating
+        // around a stationary point never accumulates, while genuine slow movement still
+        // counts in full as soon as it clears the threshold measured from that stable anchor.
+        val distance = haversineMeters(previousAnchor, position)
+        if (distance < jitterThreshold(previousAnchor, position)) return 0.0
         anchor = position
         return distance
     }
 
-    fun breakChain(): Double = 0.0.also { anchor = null }
+    private fun jitterThreshold(previous: LocationPosition, current: LocationPosition): Double {
+        val combinedAccuracy = (previous.horizontalAccuracyMeters ?: 0f) + (current.horizontalAccuracyMeters ?: 0f)
+        return maxOf(minMovementMeters, combinedAccuracy * jitterAccuracyFraction)
+    }
+
+    fun breakChain(): Double = 0.0.also { anchor = null; lastFix = null }
 
     private fun LocationPosition.isValid() = latitude.isFinite() && longitude.isFinite() &&
         latitude in -90.0..90.0 && longitude in -180.0..180.0

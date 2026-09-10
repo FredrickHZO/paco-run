@@ -60,4 +60,34 @@ class LocationSampleMapperTest {
 
         assertTrue(mapper.map(speedMps = 2.5f, accuracyMps = .5f, ageMillis = 0L).reliable)
     }
+
+    @Test
+    fun rejectsPoorHorizontalAccuracy() {
+        val sample = mapper.map(speedMps = 2.5f, accuracyMps = .1f, ageMillis = 0L, horizontalAccuracyMeters = 25f)
+
+        assertFalse(sample.reliable)
+    }
+
+    @Test
+    fun acceptsGoodHorizontalAccuracy() {
+        val sample = mapper.map(speedMps = 2.5f, accuracyMps = .1f, ageMillis = 0L, horizontalAccuracyMeters = 10f)
+
+        assertTrue(sample.reliable)
+    }
+
+    @Test
+    fun missingHorizontalAccuracyDoesNotDisqualifyTheFix() {
+        val sample = mapper.map(speedMps = 2.5f, accuracyMps = .1f, ageMillis = 0L, horizontalAccuracyMeters = null)
+
+        assertTrue(sample.reliable)
+    }
+
+    @Test
+    fun acceptsConfiguredHorizontalAccuracyThreshold() {
+        val mapper = LocationSampleMapper(maxHorizontalAccuracyMeters = 30f)
+
+        assertTrue(
+            mapper.map(speedMps = 2.5f, accuracyMps = .1f, ageMillis = 0L, horizontalAccuracyMeters = 25f).reliable,
+        )
+    }
 }

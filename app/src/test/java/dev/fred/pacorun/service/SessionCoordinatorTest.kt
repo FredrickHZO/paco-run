@@ -42,11 +42,14 @@ class SessionCoordinatorTest {
         coordinator.tick(
             elapsedRealtimeMillis = 1_000L,
             sample = reliableSample(9f, 1_000L),
-            position = LocationPosition(0.0, .00001, 1_000L),
+            // 0.0001 degrees longitude at the equator (~11.13m): a real movement, comfortably
+            // clear of DistanceAccumulator's jitter floor (unlike the previous 0.00001/1.11m,
+            // which the jitter filter now correctly suppresses as noise).
+            position = LocationPosition(0.0, .0001, 1_000L),
         )
 
         assertEquals(listOf("routine", "reset", "pace", "cues:ROUTINE_START, TOO_FAST"), events)
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         val state = published.last() as RunSessionState.Running
         assertEquals(RoutinePhase.RUN, state.phase)
         assertEquals(9f, state.speedKmh)
@@ -96,9 +99,9 @@ class SessionCoordinatorTest {
         coordinator.tick(0L, sample = null, position = null)
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
         coordinator.tick(1_000L, sample = null, position = null)
-        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .00001, 1_000L))
+        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .0001, 1_000L))
 
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         assertEquals(4, routine.inputs.size)
         assertEquals(2, pace.samples.size)
         assertTrue(pace.samples[0].reliable)
@@ -139,10 +142,10 @@ class SessionCoordinatorTest {
 
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
         coordinator.advanceTimer(1_000L, signalGpsOutage = false)
-        coordinator.tick(1_900L, reliableSample(8f, 1_900L), LocationPosition(0.0, .00001, 1_900L))
+        coordinator.tick(1_900L, reliableSample(8f, 1_900L), LocationPosition(0.0, .0001, 1_900L))
 
         assertEquals(listOf(0L, 1_000L, 1_000L), routine.inputs.map { it.elapsedRealtimeMillis })
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         assertEquals(2, pace.samples.size)
         assertEquals(1_900L, pace.samples.last().elapsedRealtimeMillis)
     }
