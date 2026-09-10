@@ -1,10 +1,42 @@
 package dev.fred.pacorun.service
 
+import java.util.Random
+import kotlin.math.abs
+import kotlin.math.cos
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SpeedEstimatorTest {
+    /**
+     * Minimal noisy-trajectory helper for this task's own tests: constant-velocity ground
+     * truth with real Gaussian position noise (std = accuracy) injected into each fix, same
+     * shape the round-2 review used to catch the false-triggering bug. Not the full
+     * SyntheticTrajectory class from a later task -- scoped only to what's needed here.
+     */
+    private class NoisyConstantVelocityTrajectory(
+        private val accuracyMeters: Float,
+        seed: Long,
+        private var latitude: Double = 45.0,
+        private val longitude: Double = 9.0,
+    ) {
+        private val random = Random(seed)
+        private var elapsedMillis = 0L
+        private val metersPerDegreeLatitude = 111_320.0
+
+        fun firstFix(): LocationPosition = LocationPosition(latitude, longitude, elapsedMillis, accuracyMeters)
+
+        /** Advances the true position by [speedKmh] for one second and returns a noisy fix. */
+        fun nextFix(speedKmh: Double): LocationPosition {
+            latitude += (speedKmh / 3.6) / metersPerDegreeLatitude
+            elapsedMillis += 1_000L
+            val metersPerDegreeLongitude = metersPerDegreeLatitude * cos(Math.toRadians(latitude))
+            val noisyLatitude = latitude + (random.nextGaussian() * accuracyMeters) / metersPerDegreeLatitude
+            val noisyLongitude = longitude + (random.nextGaussian() * accuracyMeters) / metersPerDegreeLongitude
+            return LocationPosition(noisyLatitude, noisyLongitude, elapsedMillis, accuracyMeters)
+        }
+    }
+
     @Test
     fun firstReliableFixProducesNoSpeedYet() {
         val estimator = SpeedEstimator()
@@ -70,6 +102,9 @@ class SpeedEstimatorTest {
 
     @Test
     fun sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise() {
+        // Deterministic, noise-free step change: 5 -> 12 km/h. Exact numbers are meaningful
+        // here because there's no randomness -- this is the same scenario as task-3-brief.md's
+        // original test.
         val adaptiveEstimator = SpeedEstimator()
         val fixedQEstimator = SpeedEstimator(qLow = 0.10, qHigh = 0.10) // Fixed qLow for control
         val metersPerDegree = 111_320.0
@@ -101,35 +136,28 @@ class SpeedEstimatorTest {
         assertEquals(5.0, fixedSpeed, 0.2)
 
         // Sustained jump to 12 km/h. With adaptive q, the filter should engage qHigh and
-        // settle measurably faster than with fixed qLow alone.
-        // Innovation EMA should cross threshold (~0.65) around fixes 3-4, engaging qHigh.
+        // settle measurably faster than with fixed qLow alone. (7 fixes, not 6: the round-2
+        // retuned threshold of 0.60 -- needed to keep steady-state noise from spuriously
+        // triggering qHigh, see steadyStateDoesNotFalselyTriggerAdaptiveQ below -- takes one
+        // extra fix to cross versus the original round-1 threshold of 0.30.)
         var qHighEngaged = false
-        var maxInnovationEma = 0.0
         var fixedQSettlingSpeed = 0.0
 
-        repeat(8) { fixIndex ->
+        repeat(7) {
             val (adaptive, fixed) = step(12.0)
             adaptiveSpeed = adaptive
-            fixedSpeed = fixed
             fixedQSettlingSpeed = fixed
 
-            val currentInnovationEma = adaptiveEstimator.getLastInnovationEma()
-            val currentProcessNoise = adaptiveEstimator.getLastProcessNoise()
-            maxInnovationEma = kotlin.math.max(maxInnovationEma, currentInnovationEma)
-
-            // Check if qHigh (25.0) was engaged
-            if (currentProcessNoise > 1.0) {
+            // qHigh (0.75) is well above qLow (0.10); anything past the midpoint means it engaged.
+            if (adaptiveEstimator.getLastProcessNoise() > 0.4) {
                 qHighEngaged = true
             }
         }
 
-        // Verify that adaptive approach with qHigh enabled settled measurably faster than fixed qLow.
-        // Fixed qLow settles slowly; adaptive with qHigh should be noticeably closer to target.
         assertEquals("qHigh should engage during acceleration", true, qHighEngaged)
         assertEquals("Adaptive should settle close to 12 km/h", 12.0, adaptiveSpeed, 0.5)
-        // Fixed qLow alone (with qHigh = qLow) should lag significantly behind.
-        val adaptiveError = kotlin.math.abs(adaptiveSpeed - 12.0)
-        val fixedError = kotlin.math.abs(fixedQSettlingSpeed - 12.0)
+        val adaptiveError = abs(adaptiveSpeed - 12.0)
+        val fixedError = abs(fixedQSettlingSpeed - 12.0)
         assertTrue(
             "Adaptive should be closer to target than fixed qLow " +
             "(adaptive: ${"%.2f".format(adaptiveSpeed)}, fixed: ${"%.2f".format(fixedQSettlingSpeed)})",
@@ -138,38 +166,97 @@ class SpeedEstimatorTest {
     }
 
     @Test
-    fun steadyStateDoesNotFalselyTriggerAdaptiveQ() {
-        // Verify that at steady 5 km/h with realistic 3m accuracy, noise alone doesn't
-        // cause qHigh to engage spuriously.
-        val estimator = SpeedEstimator()
-        val metersPerDegree = 111_320.0
-        var latitude = 45.0
-        var elapsedMillis = 0L
-        var speedKmh = 0.0
+    fun sustainedAccelerationSettlesFasterThanFixedQWithRealNoise() {
+        // Round-2 evidence: the noise-free test above proves the switch *can* engage, but says
+        // nothing about real GPS noise. Re-run the same 5 -> 12 km/h step across several seeds
+        // and accuracy levels (3-6.6m, the design spec's measured range) with real Gaussian
+        // position noise, and confirm the adaptive filter is *statistically*, not just once,
+        // closer to the true speed than a fixed-qLow control fed the exact same noisy fixes.
+        val accuracies = listOf(3f, 4.5f, 6.6f)
+        var adaptiveBetterCount = 0
+        var totalRuns = 0
+        val adaptiveErrors = mutableListOf<Double>()
+        val fixedErrors = mutableListOf<Double>()
 
-        fun step(speedKmhSegment: Double): Double {
-            latitude += (speedKmhSegment / 3.6) / metersPerDegree
-            elapsedMillis += 1_000L
-            return estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
-        }
+        for (accuracy in accuracies) {
+            for (seed in 1L..6L) {
+                val trajectory = NoisyConstantVelocityTrajectory(accuracy, seed = seed * 1000 + accuracy.toLong())
+                val adaptive = SpeedEstimator()
+                val fixed = SpeedEstimator(qLow = 0.10, qHigh = 0.10)
 
-        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
-        var qHighEverEngaged = false
+                val firstFix = trajectory.firstFix()
+                adaptive.accept(firstFix, reliable = true)
+                fixed.accept(firstFix, reliable = true)
+                repeat(15) {
+                    val noisyFix = trajectory.nextFix(5.0)
+                    adaptive.accept(noisyFix, reliable = true)
+                    fixed.accept(noisyFix, reliable = true)
+                }
 
-        // Steady 5 km/h for 20 fixes (more than enough to show if spurious engagement happens).
-        repeat(20) {
-            speedKmh = step(5.0)
-            if (estimator.getLastProcessNoise() > 1.0) {
-                qHighEverEngaged = true
+                var adaptiveSpeed = 0.0
+                var fixedSpeed = 0.0
+                repeat(6) {
+                    val noisyFix = trajectory.nextFix(12.0)
+                    adaptiveSpeed = adaptive.accept(noisyFix, reliable = true)
+                    fixedSpeed = fixed.accept(noisyFix, reliable = true)
+                }
+
+                val adaptiveError = abs(adaptiveSpeed - 12.0)
+                val fixedError = abs(fixedSpeed - 12.0)
+                adaptiveErrors.add(adaptiveError)
+                fixedErrors.add(fixedError)
+                if (adaptiveError < fixedError) adaptiveBetterCount++
+                totalRuns++
             }
         }
 
-        assertEquals(5.0, speedKmh, 0.2)
-        assertEquals(
-            "Steady-state constant speed should NOT trigger qHigh (no acceleration)",
-            false,
-            qHighEverEngaged
+        val medianAdaptiveError = adaptiveErrors.sorted()[adaptiveErrors.size / 2]
+        val medianFixedError = fixedErrors.sorted()[fixedErrors.size / 2]
+
+        // Reliable, not lucky: adaptive beats the fixed-qLow control on a clear majority of
+        // these 18 seeded noisy runs, and its typical (median) error is meaningfully lower.
+        assertTrue(
+            "Adaptive should beat fixed qLow on a majority of noisy runs " +
+                "(won $adaptiveBetterCount/$totalRuns)",
+            adaptiveBetterCount >= (totalRuns * 0.7).toInt()
         )
+        assertTrue(
+            "Adaptive median error ($medianAdaptiveError) should be clearly below fixed median error ($medianFixedError)",
+            medianAdaptiveError < medianFixedError * 0.9
+        )
+    }
+
+    @Test
+    fun steadyStateDoesNotFalselyTriggerAdaptiveQ() {
+        // Round-2 evidence: with the old *unsigned*-magnitude EMA, real GPS noise alone (no
+        // acceleration at all) crossed the threshold on ~96% of fixes. Verify the signed-EMA
+        // switch does NOT do this: inject real Gaussian noise (std = accuracy, 3-6.6m per the
+        // design spec) into an otherwise-constant-velocity trajectory and confirm qHigh spends
+        // only a small fraction of fixes engaged -- occasional brief spikes are fine, spending
+        // most of the time in qHigh is not.
+        val accuracies = listOf(3f, 4.5f, 6.6f)
+
+        for (accuracy in accuracies) {
+            var highCount = 0
+            val fixes = 150
+            val trajectory = NoisyConstantVelocityTrajectory(accuracy, seed = 42L + accuracy.toInt())
+            val estimator = SpeedEstimator()
+            var speedKmh = 0.0
+
+            estimator.accept(trajectory.firstFix(), reliable = true)
+            repeat(fixes) {
+                speedKmh = estimator.accept(trajectory.nextFix(5.0), reliable = true)
+                if (estimator.getLastProcessNoise() > 0.4) highCount++
+            }
+
+            assertEquals("accuracy=$accuracy should still converge near true speed", 5.0, speedKmh, 1.0)
+            val highFraction = highCount.toDouble() / fixes
+            assertTrue(
+                "accuracy=$accuracy: qHigh engaged $highCount/$fixes fixes (${"%.1f".format(highFraction * 100)}%) " +
+                    "during pure constant-velocity noise -- should be rare, not routine",
+                highFraction < 0.15
+            )
+        }
     }
 
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =

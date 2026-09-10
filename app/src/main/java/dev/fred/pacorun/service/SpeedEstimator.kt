@@ -7,13 +7,35 @@ import kotlin.math.sqrt
 
 class SpeedEstimator(
     private val qLow: Double = 0.10,
-    private val qHigh: Double = 25.0,
-    private val innovationThreshold: Double = 0.30,
+    // Round-2 fix: qHigh=25.0 (a ~250x jump from qLow) was tuned against a noise-free
+    // simulation. Against real GPS noise it makes the filter's Kalman gain approach 1 once
+    // engaged -- i.e. nearly pure pass-through of the raw noisy position -- which amplifies
+    // per-fix position noise directly into large, spurious velocity swings. A much smaller
+    // jump (~7.5x qLow) still measurably speeds up settling on a real acceleration without
+    // that amplification. See task-3-report.md for the empirical sweep across qHigh values.
+    private val qHigh: Double = 0.75,
+    // Round-2 fix: 0.30 was tuned against noise-free innovation math. Empirically, a
+    // consecutive-fixes hysteresis requirement was also tried on top of the signed EMA (see
+    // task-3-report.md) but cost more detection latency than it saved in false-positive rate
+    // within a realistic settling budget; a higher single-fix threshold on the signed EMA alone
+    // gives a better empirical trade-off between the two properties this switch must satisfy.
+    private val innovationThreshold: Double = 0.60,
     private val innovationEmaAlpha: Double = 0.3,
 ) {
+    // Round-2 fix: an EMA of *unsigned* normalized innovation magnitude cannot tell a real
+    // sustained acceleration apart from routine GPS noise -- a correctly-calibrated Kalman
+    // filter's normalized innovation behaves like |Z| for a standard normal Z even at true
+    // constant velocity (E|Z| ~= 0.8), so its EMA wanders close to any threshold low enough to
+    // catch a real speed step. Signed innovation doesn't have this problem: pure noise flips
+    // sign fix-to-fix and its EMA reverts toward zero, while a sustained real acceleration
+    // biases the innovation in one direction for several fixes in a row and its EMA grows.
+    // See task-3-report.md for the empirical evidence.
     private class AxisKalman(initialPosition: Double) {
         var position: Double = initialPosition
         var velocity: Double = 0.0
+        /** Signed normalized innovation from the most recent [update] call -- see class-level comment. */
+        var lastSignedNormalizedInnovation: Double = 0.0
+            private set
         private var p00: Double = INITIAL_POSITION_VARIANCE
         private var p01: Double = 0.0
         private var p10: Double = 0.0
@@ -35,7 +57,9 @@ class SpeedEstimator(
         fun update(measurement: Double, measurementVariance: Double): Double {
             val innovation = measurement - position
             val innovationVariance = p00 + measurementVariance
-            val normalizedInnovation = kotlin.math.abs(innovation) / sqrt(innovationVariance)
+            val signedNormalizedInnovation = innovation / sqrt(innovationVariance)
+            lastSignedNormalizedInnovation = signedNormalizedInnovation
+            val normalizedInnovation = kotlin.math.abs(signedNormalizedInnovation)
             val k0 = p00 / innovationVariance
             val k1 = p10 / innovationVariance
             position += k0 * innovation
@@ -59,11 +83,14 @@ class SpeedEstimator(
     private var originLatitude: Double? = null
     private var originLongitude: Double? = null
     private var lastElapsedRealtimeMillis: Long? = null
-    private var innovationEma: Double = 0.0
+    // Signed innovation EMA per axis (see class-level comment): reverts toward zero under
+    // symmetric noise, grows under a sustained real acceleration biased in one direction.
+    private var eastInnovationEma: Double = 0.0
+    private var northInnovationEma: Double = 0.0
     private var lastProcessNoise: Double = qLow
 
     // Test/debugging accessors (internal visibility)
-    internal fun getLastInnovationEma(): Double = innovationEma
+    internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
     internal fun getLastProcessNoise(): Double = lastProcessNoise
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
@@ -89,16 +116,17 @@ class SpeedEstimator(
         val dtSeconds = (position.elapsedRealtimeMillis - previousElapsed) / 1_000.0
         if (dtSeconds <= 0.0) return breakChain()
 
-        val processNoise = if (innovationEma > innovationThreshold) qHigh else qLow
+        val processNoise = if (maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma)) > innovationThreshold) qHigh else qLow
         lastProcessNoise = processNoise
         east.predict(dtSeconds, processNoise)
         north.predict(dtSeconds, processNoise)
 
         val accuracyMeters = (position.horizontalAccuracyMeters ?: DEFAULT_HORIZONTAL_ACCURACY_METERS).coerceAtLeast(1f)
         val measurementVariance = accuracyMeters.toDouble().pow(2)
-        val eastInnovation = east.update(x, measurementVariance)
-        val northInnovation = north.update(y, measurementVariance)
-        innovationEma = innovationEmaAlpha * maxOf(eastInnovation, northInnovation) + (1 - innovationEmaAlpha) * innovationEma
+        east.update(x, measurementVariance)
+        north.update(y, measurementVariance)
+        eastInnovationEma = innovationEmaAlpha * east.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * eastInnovationEma
+        northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
 
         lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
         return hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
@@ -108,7 +136,8 @@ class SpeedEstimator(
         eastAxis = null
         northAxis = null
         lastElapsedRealtimeMillis = null
-        innovationEma = 0.0
+        eastInnovationEma = 0.0
+        northInnovationEma = 0.0
         return 0.0
     }
 
