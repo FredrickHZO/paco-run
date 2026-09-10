@@ -37,14 +37,18 @@ fun AmbientShapeField(lightScheme: Boolean, modifier: Modifier = Modifier) {
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 18_000, easing = LinearEasing),
+            animation = tween(durationMillis = 30_000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "ambient-phase",
     )
     val radians = phase * (PI.toFloat() / 180f)
-    val wave = sin(radians)
-    val crossingWave = cos(radians)
+    // The blobs orbit their resting corner in a full circle each cycle (returning exactly to
+    // start since cos/sin are continuous across the 360->0 restart), plus a smaller, faster
+    // horizontal-only sway layered on top for a less mechanical, more organic drift.
+    val orbitX = cos(radians)
+    val orbitY = sin(radians)
+    val horizontalSway = sin(radians * 2f)
     val colors = MaterialTheme.colorScheme
     val primaryAlpha = if (lightScheme) 0.22f else 0.08f
     val tertiaryAlpha = if (lightScheme) 0.20f else 0.07f
@@ -60,10 +64,10 @@ fun AmbientShapeField(lightScheme: Boolean, modifier: Modifier = Modifier) {
         val upperHeight = 600.dp.toPx()
         val lowerWidth = 600.dp.toPx()
         val lowerHeight = 600.dp.toPx()
-        val driftX = 7.dp.toPx()
-        val driftY = 5.dp.toPx()
+        val orbitRadiusX = 64.dp.toPx()
+        val orbitRadiusY = 44.dp.toPx()
+        val swayAmplitude = 18.dp.toPx()
         val upperCenterY = 90.dp.toPx()
-        val lowerDriftX = 6.dp.toPx()
         val lowerCenterOffset = -100.dp.toPx()
         fun drawAmbient(path: Path, bounds: Rect, width: Float, height: Float, center: Offset, degrees: Float, color: Color) {
             val placedPath = Path().apply {
@@ -80,7 +84,10 @@ fun AmbientShapeField(lightScheme: Boolean, modifier: Modifier = Modifier) {
             upperBounds,
             upperWidth,
             upperHeight,
-            Offset(100.dp.toPx() + crossingWave * driftX, upperCenterY + wave * driftY),
+            Offset(
+                100.dp.toPx() + orbitX * orbitRadiusX + horizontalSway * swayAmplitude,
+                upperCenterY + orbitY * orbitRadiusY,
+            ),
             0f,
             colors.primaryContainer.copy(alpha = primaryAlpha),
         )
@@ -89,7 +96,10 @@ fun AmbientShapeField(lightScheme: Boolean, modifier: Modifier = Modifier) {
             lowerBounds,
             lowerWidth,
             lowerHeight,
-            Offset(size.width - 80.dp.toPx() - crossingWave * lowerDriftX, size.height + lowerCenterOffset - wave * driftY),
+            Offset(
+                size.width - 80.dp.toPx() - orbitX * orbitRadiusX - horizontalSway * swayAmplitude,
+                size.height + lowerCenterOffset - orbitY * orbitRadiusY,
+            ),
             0f,
             colors.tertiaryContainer.copy(alpha = tertiaryAlpha),
         )
