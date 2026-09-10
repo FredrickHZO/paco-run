@@ -67,6 +67,31 @@ class SpeedEstimatorTest {
         assertEquals(10.0, speedKmh, 0.2)
     }
 
+    @Test
+    fun sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise() {
+        val estimator = SpeedEstimator()
+        val metersPerDegree = 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+        var speedKmh = 0.0
+
+        fun step(speedKmhSegment: Double): Double {
+            latitude += (speedKmhSegment / 3.6) / metersPerDegree
+            elapsedMillis += 1_000L
+            return estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        }
+
+        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
+        // Settle at 5 km/h first.
+        repeat(15) { speedKmh = step(5.0) }
+        assertEquals(5.0, speedKmh, 0.2)
+
+        // Sustained jump to 12 km/h -- give it 8 fixes to catch up (adaptive q kicks in
+        // around fix 5, giving time for the filter to track the new speed).
+        repeat(8) { speedKmh = step(12.0) }
+        assertEquals(12.0, speedKmh, 1.0)
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

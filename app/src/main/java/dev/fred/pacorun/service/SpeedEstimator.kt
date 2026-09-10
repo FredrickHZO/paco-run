@@ -84,13 +84,15 @@ class SpeedEstimator(
         val dtSeconds = (position.elapsedRealtimeMillis - previousElapsed) / 1_000.0
         if (dtSeconds <= 0.0) return breakChain()
 
-        east.predict(dtSeconds, qLow)
-        north.predict(dtSeconds, qLow)
+        val processNoise = if (innovationEma > innovationThreshold) qHigh else qLow
+        east.predict(dtSeconds, processNoise)
+        north.predict(dtSeconds, processNoise)
 
         val accuracyMeters = (position.horizontalAccuracyMeters ?: DEFAULT_HORIZONTAL_ACCURACY_METERS).coerceAtLeast(1f)
         val measurementVariance = accuracyMeters.toDouble().pow(2)
-        east.update(x, measurementVariance)
-        north.update(y, measurementVariance)
+        val eastInnovation = east.update(x, measurementVariance)
+        val northInnovation = north.update(y, measurementVariance)
+        innovationEma = innovationEmaAlpha * maxOf(eastInnovation, northInnovation) + (1 - innovationEmaAlpha) * innovationEma
 
         lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
         return hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
