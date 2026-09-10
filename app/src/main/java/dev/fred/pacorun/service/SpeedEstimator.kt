@@ -8,7 +8,7 @@ import kotlin.math.sqrt
 class SpeedEstimator(
     private val qLow: Double = 0.10,
     private val qHigh: Double = 25.0,
-    private val innovationThreshold: Double = 1.75,
+    private val innovationThreshold: Double = 0.30,
     private val innovationEmaAlpha: Double = 0.3,
 ) {
     private class AxisKalman(initialPosition: Double) {
@@ -60,6 +60,11 @@ class SpeedEstimator(
     private var originLongitude: Double? = null
     private var lastElapsedRealtimeMillis: Long? = null
     private var innovationEma: Double = 0.0
+    private var lastProcessNoise: Double = qLow
+
+    // Test/debugging accessors (internal visibility)
+    internal fun getLastInnovationEma(): Double = innovationEma
+    internal fun getLastProcessNoise(): Double = lastProcessNoise
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) return breakChain()
@@ -85,6 +90,7 @@ class SpeedEstimator(
         if (dtSeconds <= 0.0) return breakChain()
 
         val processNoise = if (innovationEma > innovationThreshold) qHigh else qLow
+        lastProcessNoise = processNoise
         east.predict(dtSeconds, processNoise)
         north.predict(dtSeconds, processNoise)
 
