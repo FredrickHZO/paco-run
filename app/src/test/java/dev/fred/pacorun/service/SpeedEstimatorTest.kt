@@ -47,6 +47,26 @@ class SpeedEstimatorTest {
         assertEquals(0.0, estimator.accept(fix(0.0, .0001, 1_000L), reliable = true), .001)
     }
 
+    @Test
+    fun constantVelocityNoNoiseConvergesToTrueSpeed() {
+        val estimator = SpeedEstimator()
+        // 10 km/h north, no measurement noise: 1 degree latitude ~= 111_320m, so each 1s
+        // step advances latitude by (10/3.6) / 111_320 degrees.
+        val metersPerSecond = 10.0 / 3.6
+        val degreesPerSecond = metersPerSecond / 111_320.0
+        var latitude = 45.0
+        var speedKmh = 0.0
+
+        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
+        repeat(15) { i ->
+            latitude += degreesPerSecond
+            speedKmh = estimator.accept(LocationPosition(latitude, 9.0, (i + 1) * 1_000L, 3f), reliable = true)
+        }
+
+        // 15 fixes of noise-free constant motion is comfortably enough to converge.
+        assertEquals(10.0, speedKmh, 0.2)
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }
