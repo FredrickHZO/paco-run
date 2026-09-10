@@ -20,15 +20,15 @@ class SessionVisualStateTest {
     }
 
     @Test
-    fun urgencyIsZeroOutsideTheLastThreeSeconds() {
+    fun urgencyIsZeroOutsideTheLastTenSeconds() {
         assertEquals(0f, urgency(null), 0f)
-        assertEquals(0f, urgency(3_000L), 0f)
         assertEquals(0f, urgency(10_000L), 0f)
+        assertEquals(0f, urgency(20_000L), 0f)
     }
 
     @Test
     fun urgencyRampsLinearlyToOneAtZeroRemaining() {
-        assertEquals(0.5f, urgency(1_500L), 0.001f)
+        assertEquals(0.5f, urgency(5_000L), 0.001f)
         assertEquals(1f, urgency(0L), 0f)
         assertEquals(1f, urgency(-500L), 0f)
     }

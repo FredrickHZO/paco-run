@@ -12,7 +12,7 @@ fun heroKind(phase: RoutinePhase): HeroKind = when (phase) {
     RoutinePhase.CONSTANT, RoutinePhase.CONSTANT_BEFORE, RoutinePhase.CONSTANT_AFTER -> HeroKind.SPEED
 }
 
-private const val URGENCY_WINDOW_MILLIS = 3_000L
+private const val URGENCY_WINDOW_MILLIS = 10_000L
 
 /** 0 outside the last [URGENCY_WINDOW_MILLIS] of an interval, ramping linearly to 1 at zero remaining. */
 fun urgency(remainingMillis: Long?): Float {
