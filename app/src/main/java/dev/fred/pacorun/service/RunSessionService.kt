@@ -22,6 +22,9 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import dev.fred.pacorun.R
 import dev.fred.pacorun.audio.CuePlayer
+import dev.fred.pacorun.export.GpxExporter
+import dev.fred.pacorun.export.GpxWriter
+import dev.fred.pacorun.export.TrackPoint
 import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
 import dev.fred.pacorun.pace.PaceEvaluator
@@ -50,6 +53,7 @@ class RunSessionService : Service() {
     private var lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
     private var gpsFreshness = GpsFreshnessTracker()
     private val notificationTracker = SessionNotificationTracker()
+    private val trackPoints = mutableListOf<TrackPoint>()
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -124,6 +128,7 @@ class RunSessionService : Service() {
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
         gpsFreshness = GpsFreshnessTracker()
+        trackPoints.clear()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSession()
             return
@@ -145,6 +150,17 @@ class RunSessionService : Service() {
         val now = SystemClock.elapsedRealtime()
         val sample = LocationSampleMapper().map(location, now)
         gpsFreshness.record(sample)
+        // Every raw fix, reliable or not -- so the exported track shows exactly what was
+        // (and wasn't) trusted, which is the whole point of comparing it against another app.
+        trackPoints += TrackPoint(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            timeEpochMillis = location.time,
+            speedMps = location.takeIf { it.hasSpeed() }?.speed,
+            horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
+            speedAccuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond,
+            reliable = sample.reliable,
+        )
         coordinator?.tick(
             elapsedRealtimeMillis = now,
             sample = sample,
@@ -152,6 +168,7 @@ class RunSessionService : Service() {
                 latitude = location.latitude,
                 longitude = location.longitude,
                 elapsedRealtimeMillis = TimeUnit.NANOSECONDS.toMillis(location.elapsedRealtimeNanos),
+                horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
             ),
         )
     }
@@ -172,6 +189,7 @@ class RunSessionService : Service() {
     }
 
     private fun stopSession() {
+        exportTrackAsGpx()
         sessionToken++
         handler.removeCallbacks(ticker)
         if (locationRequested) {
@@ -185,6 +203,28 @@ class RunSessionService : Service() {
         RunSessionStore.publish(RunSessionState.Idle)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    // A plain Thread, not the service's own coroutine `scope` -- that scope is cancelled in
+    // onDestroy(), which stopSession() triggers via stopSelf() moments later, and would race
+    // the write. The Thread only touches an application Context (safe past the service's own
+    // lifecycle) and a snapshot of the point list, so it can finish safely on its own.
+    private fun exportTrackAsGpx() {
+        if (trackPoints.isEmpty()) return
+        val points = trackPoints.toList()
+        val context = applicationContext
+        Thread {
+            // An uncaught exception on any thread kills the whole process by default -- this
+            // write (MediaStore insert/open/write) can throw for reasons outside our control
+            // (storage full, restrictive OEM scoped-storage behavior), and the export is a
+            // best-effort extra, not worth taking the app down over.
+            try {
+                val fileName = GpxExporter.fileNameFor(java.time.Instant.ofEpochMilli(points.first().timeEpochMillis))
+                val gpx = GpxWriter.build(points, activityName = "Paco Run")
+                GpxExporter.writeToDownloads(context, fileName, gpx)
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 
     private fun locationRequest(): LocationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, TICK_MILLIS)
