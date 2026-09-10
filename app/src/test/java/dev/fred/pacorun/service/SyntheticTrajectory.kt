@@ -9,7 +9,7 @@ import kotlin.random.Random
 object SyntheticTrajectory {
     data class Fix(val position: LocationPosition, val trueSpeedKmh: Double)
 
-    private const val METERS_PER_DEGREE_LATITUDE = 222_640.0
+    private const val METERS_PER_DEGREE_LATITUDE = 111_320.0
     private const val KMH_TO_METERS_PER_SECOND = 1.0 / 3.6
 
     fun generate(
