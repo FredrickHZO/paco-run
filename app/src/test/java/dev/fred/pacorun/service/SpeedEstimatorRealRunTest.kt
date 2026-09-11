@@ -23,7 +23,7 @@ class SpeedEstimatorRealRunTest {
     }
 
     private fun loadPacoRunGpxFixture(): List<Pair<LocationPosition, Boolean>> {
-        val stream = javaClass.classLoader.getResourceAsStream("paco-run-2026-09-10-1122.gpx")
+        val stream = javaClass.classLoader?.getResourceAsStream("paco-run-2026-09-10-1122.gpx")
             ?: error("fixture not found on test classpath")
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(stream)
         val trkpts = document.getElementsByTagName("trkpt")
