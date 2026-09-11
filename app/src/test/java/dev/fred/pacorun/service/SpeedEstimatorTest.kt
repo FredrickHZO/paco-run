@@ -355,6 +355,42 @@ class SpeedEstimatorTest {
         )
     }
 
+    @Test
+    fun accuracyGatedFixDoesNotPoisonInnovationEma() {
+        // A gated fix's Kalman update() still runs (that math is untouched and correctly
+        // down-weights the noisy point), but its necessarily-large innovation must NOT be folded
+        // into eastInnovationEma/northInnovationEma -- otherwise this fix's own degraded-accuracy
+        // noise would poison the *next* fix's switch decision, even though nothing about it
+        // reflects a real acceleration. Verify the EMA is unchanged by the gated fix.
+        val estimator = SpeedEstimator()
+        val metersPerDegree = 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+
+        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
+        repeat(15) {
+            latitude += (5.0 / 3.6) / metersPerDegree
+            elapsedMillis += 1_000L
+            estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        }
+        val emaBeforeGatedFix = estimator.getLastInnovationEma()
+
+        // A huge position jump (a real acceleration would produce a similarly large innovation)
+        // combined with severely degraded accuracy (30 m vs. the converged 3 m baseline) --
+        // engages the gate.
+        latitude += 50.0 / metersPerDegree
+        elapsedMillis += 1_000L
+        estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 30f), reliable = true)
+
+        assertTrue("precondition: the gate should have engaged on this fix", estimator.getLastAccuracyGateEngaged())
+        assertEquals(
+            "a gated fix's innovation must not change eastInnovationEma/northInnovationEma",
+            emaBeforeGatedFix,
+            estimator.getLastInnovationEma(),
+            1e-9,
+        )
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }
