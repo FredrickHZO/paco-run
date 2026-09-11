@@ -27,9 +27,15 @@ class SpeedEstimator(
     // adaptive switch above, added after the prior plan's final review found the switch can be
     // fooled by a sudden, severe accuracy degradation with no real motion change -- the raw
     // position noise from bad accuracy looks just like a real acceleration to the innovation
-    // detector. See task-1-report.md for the empirical derivation of these two values.
-    private val accuracyDegradationRatio: Double = 1.8,
-    private val accuracyBaselineAlpha: Double = 0.1,
+    // detector. Empirical sweep (see task-1-report.md): alpha=0.05/ratio=2.0 is the slowest
+    // baseline / smallest threshold combination in the sweep that (a) protects every single fix
+    // of the Task 8 degraded burst across all 5000 swept seeds (minimum gated count 8/8, not just
+    // the first fix -- this is what rules out a single-previous-fix baseline, which would only
+    // catch the first fix) and (b) produces zero false engagements against the real recorded
+    // run's ordinary 3.0-6.6 m accuracy jitter (0/5195 fixes). Ratios up to 2.2 at this alpha tie
+    // on both counts; 2.0 was picked as the round number in the middle of that flat region.
+    private val accuracyDegradationRatio: Double = 2.0,
+    private val accuracyBaselineAlpha: Double = 0.05,
 ) {
     // Round-2 fix: an EMA of *unsigned* normalized innovation magnitude cannot tell a real
     // sustained acceleration apart from routine GPS noise -- a correctly-calibrated Kalman

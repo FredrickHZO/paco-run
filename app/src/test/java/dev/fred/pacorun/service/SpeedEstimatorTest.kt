@@ -391,6 +391,58 @@ class SpeedEstimatorTest {
         )
     }
 
+    @Test
+    fun accuracyGateProtectsWholeDegradedBurstUnlikeANaiveLastFixBaseline() {
+        // Task 8 finding (prior plan's final review): the false transient peaks partway through
+        // a multi-fix degraded-accuracy burst (fix 4-6 of 8), not on the very first degraded fix.
+        // A single-previous-fix baseline would only see a large ratio on the very first degraded
+        // fix (compared against the last *good* fix); every fix after that compares one degraded
+        // fix's accuracy against the previous fix's *already-degraded* accuracy, so the ratio
+        // collapses back near 1.0 and it silently stops protecting right where the transient
+        // peaks. accuracyBaselineAlpha=1.0 makes the baseline fully replace itself with the
+        // current fix's own accuracy every time -- exactly a "compare against the last fix" rule
+        // -- so it stands in here for that explicitly-rejected naive approach. This test proves
+        // the default EMA baseline (real memory, alpha=0.05) keeps firing across the *whole*
+        // burst, while the naive alpha=1.0 baseline stops after fix 1.
+        val emaGatedEstimator = SpeedEstimator()
+        val naiveLastFixEstimator = SpeedEstimator(accuracyBaselineAlpha = 1.0)
+        val metersPerDegree = 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+
+        fun step(accuracy: Float) {
+            latitude += (8.0 / 3.6) / metersPerDegree
+            elapsedMillis += 1_000L
+            val pos = LocationPosition(latitude, 9.0, elapsedMillis, accuracy)
+            emaGatedEstimator.accept(pos, reliable = true)
+            naiveLastFixEstimator.accept(pos, reliable = true)
+        }
+
+        emaGatedEstimator.accept(LocationPosition(latitude, 9.0, 0L, 3.5f), reliable = true)
+        naiveLastFixEstimator.accept(LocationPosition(latitude, 9.0, 0L, 3.5f), reliable = true)
+        repeat(20) { step(3.5f) }
+
+        val emaGateEngaged = mutableListOf<Boolean>()
+        val naiveGateEngaged = mutableListOf<Boolean>()
+        repeat(8) {
+            step(20f)
+            emaGateEngaged += emaGatedEstimator.getLastAccuracyGateEngaged()
+            naiveGateEngaged += naiveLastFixEstimator.getLastAccuracyGateEngaged()
+        }
+
+        assertEquals(
+            "the EMA-baseline gate (default alpha) must protect every fix of the 8-fix degraded burst",
+            List(8) { true },
+            emaGateEngaged,
+        )
+        assertEquals(
+            "a naive last-fix baseline (alpha=1.0) only catches the first fix of the burst, then " +
+                "silently stops protecting -- exactly the failure mode this design rejects",
+            listOf(true, false, false, false, false, false, false, false),
+            naiveGateEngaged,
+        )
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }
