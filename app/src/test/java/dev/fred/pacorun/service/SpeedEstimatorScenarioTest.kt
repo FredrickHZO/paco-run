@@ -232,11 +232,20 @@ class SpeedEstimatorScenarioTest {
      * noise samples is common enough to occasionally push the signed-innovation EMA over the
      * (validated, untouched) 0.60 threshold, engaging qHigh -- at which point the filter is
      * legitimately more responsive, so it also responds more to the large measurement noise
-     * itself. Traced on the worst canonical seed: q alternates between 0.1 and 0.75 during the
-     * burst and the estimate swings widely (10.3-19.3 km/h against a true 8 km/h), but always
-     * tracks back toward 8 -- confirmed bounded/self-correcting rather than runaway by extending
-     * the same burst to 60 fixes: the estimate keeps oscillating in a wide-but-bounded band
-     * (roughly 3.6-19.3 km/h), never diverging further. This is a real, elevated noise floor for
+     * itself. Traced on the worst canonical seed (seed 7, via
+     * [SpeedEstimator.getLastProcessNoise] / [SpeedEstimator.getLastInnovationEma] on each of the
+     * 8 degraded fixes): est=9.44 (q=0.10), 8.39 (q=0.10), 8.69 (q=0.75), 8.72 (q=0.10), 9.07
+     * (q=0.10), 10.75 (q=0.75), 10.43 (q=0.10), 12.52 (q=0.75) -- q repeatedly jumps to 0.75 as
+     * the innovation EMA crosses 0.60, the filter gets more responsive, and the estimate swings up
+     * to 12.52 km/h against a true 8 km/h (max deviation 4.518, matching the sweep table below)
+     * without ever tracking away from 8 for more than a couple of fixes. Confirmed
+     * bounded/self-correcting rather than runaway by extending the burst to 60 fixes on two
+     * seeds: seed 7 ranges 3.81-13.28 km/h, and the sweep's own worst seed (1122, see below)
+     * ranges 0.60-22.49 km/h -- wider, since it starts from a noisier 8-fix window. The two seeds
+     * don't agree on a specific numeric band, so no single range is quoted as a ceiling here; what
+     * held in both (and in every other case tried) is the qualitative behavior -- the estimate
+     * keeps oscillating around the true 8 km/h and never diverges further or runs away, however
+     * wide the swings get on a given seed. This is a real, elevated noise floor for
      * this specific transition (a confident filter suddenly hit by severely degraded accuracy
      * with no real motion change) that the real-run validation never exercised -- that
      * recording's degraded-accuracy spikes occurred right after GPS acquisition, when the filter
