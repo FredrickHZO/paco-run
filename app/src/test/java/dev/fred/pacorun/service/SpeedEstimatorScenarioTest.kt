@@ -170,11 +170,18 @@ class SpeedEstimatorScenarioTest {
      * during-ramp and post-ramp) per seed:
      *   - The 5 canonical [seeds] above: 2.06, 2.20, 1.26, 0.81, 0.66 km/h -- max 2.20 km/h.
      *   - Widened to 103 seeds (1-100 plus 42/99/123) to find the true tail: mean 2.36 km/h,
-     *     max 5.40 km/h (seed 70, the shape traced above). Only 3 of 103 seeds exceeded 4.5 km/h.
-     * [maxOvershootKmh]=7.0 keeps ~30% margin over the widest peak overshoot found in the full
-     * 103-seed sweep (5.40), and ~3x margin over the 5 canonical seeds actually asserted below --
-     * comfortable margin either way, not a bare pass, while still well short of the completely
-     * unbounded growth a genuine adaptive-q sign error would produce.
+     *     max 5.40 km/h (seed 70, the shape traced above). 5 of 103 seeds exceeded 4.5 km/h
+     *     (seeds 41=4.60, 47=4.84, 68=4.51, 70=5.40, 85=4.76).
+     * [maxOvershootKmh]=7.0 is calibrated to keep genuine margin over the 5 canonical seeds
+     * asserted by this test (worst observed: 2.20 km/h), where there is real safety. However,
+     * the bound is NOT a validated ceiling on the filter's general noise-driven overshoot tail:
+     * a wider sweep to 2000 seeds found ~0.5% of seeds (10 out of 2000) outright exceed 7.0 km/h,
+     * with a max of 8.75 km/h, and 27 of 2000 exceed 6.0 km/h. This means the 7.0 km/h bound is
+     * closer to the boundary of ordinary noise behavior than the 103-seed sample suggested.
+     * CAUTION: if this test's [seeds] list is ever widened (following Task 6's precedent), the
+     * overshoot bound should be re-derived against the new seed set rather than assumed to still
+     * hold -- a newly-added seed could legitimately (without any code regression) produce overshoot
+     * exceeding 7.0 km/h from ordinary noise-driven scatter.
      */
     private val maxOvershootKmh = 7.0
 
