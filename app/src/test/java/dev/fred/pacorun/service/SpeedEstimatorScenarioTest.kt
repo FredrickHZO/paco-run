@@ -33,6 +33,12 @@ class SpeedEstimatorScenarioTest {
      * four speeds -- 5-6 points of margin above the 90% bar, not a bare pass. Tighter combinations
      * were tried and rejected: 0.3-1.2 km/h tolerance tops out around 40-60% even with 90+ fixes of
      * warmup; only past ~2.5-2.75 km/h does the pass fraction clear 90% with real margin.
+     *
+     * Known blind spot: a tolerance this wide would not catch a uniform bias or proportional
+     * scaling error up to roughly this size (e.g. a filter reading consistently ~2 km/h low, or
+     * off by 15-20% at the low end). This test only checks precision (scatter around true speed),
+     * not bias/accuracy -- the real-run replay against Strava is what rules out bias (near-zero,
+     * MAE 0.25-0.27 km/h; see the independent validation referenced in task-5-report.md).
      */
     private val toleranceKmh = 2.75
     private val requiredFraction = 0.90
