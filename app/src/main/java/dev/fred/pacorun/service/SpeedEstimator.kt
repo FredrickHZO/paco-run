@@ -8,11 +8,13 @@ import kotlin.math.sqrt
 class SpeedEstimator(
     private val qLow: Double = 0.10,
     // Round-2 fix: qHigh=25.0 (a ~250x jump from qLow) was tuned against a noise-free
-    // simulation. Against real GPS noise it makes the filter's Kalman gain approach 1 once
-    // engaged -- i.e. nearly pure pass-through of the raw noisy position -- which amplifies
-    // per-fix position noise directly into large, spurious velocity swings. A much smaller
-    // jump (~7.5x qLow) still measurably speeds up settling on a real acceleration without
-    // that amplification. See task-3-report.md for the empirical sweep across qHigh values.
+    // simulation. Against real GPS noise it drives up the *velocity* Kalman gain (k1, not the
+    // position gain k0, which barely moves across the tested range) -- measured: k1 goes from
+    // 0.054 at q=0.10 to 0.338 at q=25, a 6.2x amplification -- which injects raw position noise
+    // directly into the velocity estimate as large, spurious swings (measured: 0.68 km/h of
+    // per-fix velocity jitter at q=0.10 vs. 4.26 km/h at q=25). A much smaller jump (~7.5x qLow)
+    // still measurably speeds up settling on a real acceleration without that amplification.
+    // See task-3-report.md for the empirical sweep across qHigh values.
     private val qHigh: Double = 0.75,
     // Round-2 fix: 0.30 was tuned against noise-free innovation math. Empirically, a
     // consecutive-fixes hysteresis requirement was also tried on top of the signed EMA (see
@@ -129,7 +131,8 @@ class SpeedEstimator(
         northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
 
         lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
-        return hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
+        val speed = hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
+        return if (speed.isFinite()) speed else breakChain()
     }
 
     fun breakChain(): Double {

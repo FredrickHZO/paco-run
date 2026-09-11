@@ -101,6 +101,50 @@ class SpeedEstimatorTest {
     }
 
     @Test
+    fun nanAccuracyDoesNotPermanentlyPoisonFilter() {
+        val estimator = SpeedEstimator()
+        val metersPerSecond = 10.0 / 3.6
+        val degreesPerSecond = metersPerSecond / 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+
+        estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        repeat(5) {
+            latitude += degreesPerSecond
+            elapsedMillis += 1_000L
+            estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        }
+
+        // A NaN horizontalAccuracyMeters must not poison the filter with NaN state -- the
+        // guarded return should break the chain and return a finite value (0.0), not NaN.
+        latitude += degreesPerSecond
+        elapsedMillis += 1_000L
+        val nanAccuracySpeed = estimator.accept(
+            LocationPosition(latitude, 9.0, elapsedMillis, Float.NaN),
+            reliable = true,
+        )
+        assertTrue("NaN accuracy fix must not produce a non-finite speed", nanAccuracySpeed.isFinite())
+        assertEquals(0.0, nanAccuracySpeed, .001)
+
+        // Recovery: breakChain() means the very next fix re-anchors (0.0 again, like a fresh
+        // first fix), then subsequent good fixes should converge normally -- proving the filter
+        // actually self-recovers, not just that the one bad output got suppressed.
+        latitude += degreesPerSecond
+        elapsedMillis += 1_000L
+        val reanchorSpeed = estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        assertEquals(0.0, reanchorSpeed, .001)
+
+        var recoveredSpeed = 0.0
+        repeat(15) {
+            latitude += degreesPerSecond
+            elapsedMillis += 1_000L
+            recoveredSpeed = estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        }
+        assertTrue("filter must recover to a finite speed after a NaN accuracy fix", recoveredSpeed.isFinite())
+        assertEquals(10.0, recoveredSpeed, 0.2)
+    }
+
+    @Test
     fun sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise() {
         // Deterministic, noise-free step change: 5 -> 12 km/h. Exact numbers are meaningful
         // here because there's no randomness -- this is the same scenario as task-3-brief.md's

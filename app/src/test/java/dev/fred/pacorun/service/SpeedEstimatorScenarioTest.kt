@@ -96,6 +96,20 @@ class SpeedEstimatorScenarioTest {
      *     Task 5's [seeds] and [requiredFraction]=0.90 bar), the rate is 0.937 (acceleration) and
      *     0.916 (deceleration) -- both with real margin above 90%, confirmed with 10 additional
      *     seeds pooled in (0.940 / 0.942 over all 15).
+     *
+     * What this pair of tests actually verifies: a basic correctness/sanity check across real
+     * noise -- that the filter settles to the right value within a reasonable number of fixes
+     * after a step change and then stays there, rather than lagging indefinitely or oscillating
+     * around the wrong value. It does NOT verify that the adaptive process-noise switch (qHigh)
+     * is what makes this settling fast: re-running this exact criterion with the switch
+     * effectively disabled (qHigh=qLow=0.10) produces identical settle indices and a
+     * slightly better stays-settled fraction than the shipped qHigh=0.75, so these tests would
+     * pass just as well without the switch doing anything. The adaptive switch's actual
+     * speed-of-detection benefit -- settling measurably faster than a fixed-qLow filter fed the
+     * same fixes -- is verified elsewhere, in SpeedEstimatorTest.kt's
+     * sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise and
+     * sustainedAccelerationSettlesFasterThanFixedQWithRealNoise, which run an explicit fixed-qLow
+     * control and would fail if the switch were removed.
      */
     private val maxFixesToSettle = 8
 
@@ -247,10 +261,12 @@ class SpeedEstimatorScenarioTest {
      * keeps oscillating around the true 8 km/h and never diverges further or runs away, however
      * wide the swings get on a given seed. This is a real, elevated noise floor for
      * this specific transition (a confident filter suddenly hit by severely degraded accuracy
-     * with no real motion change) that the real-run validation never exercised -- that
-     * recording's degraded-accuracy spikes occurred right after GPS acquisition, when the filter
-     * had not yet converged and p00 was still large, unlike this synthetic scenario's
-     * already-converged filter. Not a coding defect and not unbounded divergence.
+     * with no real motion change) that the real-run validation never exercised -- the committed
+     * fixture (paco-run-2026-09-10-1122.gpx, parsed directly: 5196 trackpoints, accuracy min
+     * 3.0m, max 6.604m, mean 3.17m) never once reports accuracy >=15m, including during GPS
+     * acquisition, so it provides no evidence either way about this transient: it's a scenario
+     * untested by real data, not one where real data happened to show it's fine. Not a coding
+     * defect and not unbounded divergence.
      *
      * The plan's single hardcoded seed=99 passed the original 2.0 km/h bound only by luck: its
      * actual max deviation is 1.924 km/h, a hair under the bound (0.076 km/h margin -- not real
