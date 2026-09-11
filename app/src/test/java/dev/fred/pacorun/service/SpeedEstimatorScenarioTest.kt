@@ -320,4 +320,89 @@ class SpeedEstimatorScenarioTest {
             worstDeviation < maxDeviationKmh,
         )
     }
+
+    /**
+     * The plan's original bound (0.8 km/h tolerance, settle within 11 fixes -- `in 0..10`, single
+     * hardcoded recovery seed=7) was miscalibrated when written, for the same root reason as Tasks
+     * 5-8: 0.8 km/h is far tighter than this filter's established noise floor against real GPS
+     * noise (~2.75 km/h for 90% of steady-state samples -- see [toleranceKmh]'s doc above). This
+     * is not the same failure mode as Tasks 5-8 predicted, though: per
+     * task-5-qlow-investigation-report.md section 9, `breakChain()` resets covariance to a wide
+     * initial prior on the next reliable fix, so recovery is governed by that reset (a from-scratch
+     * warm-up, like the very first fixes of [steadyStateAtMultipleSpeeds]), not by steady-state
+     * scatter alone -- confirmed by measurement, not assumed.
+     *
+     * Measured first, as instructed: running the brief's exact code (single seed=7, 0.8 km/h,
+     * budget 10) gives estimates=[0.0, 4.41, 18.67, 16.86, 14.79, 15.83, 11.45, 11.53, 11.67, 8.92,
+     * 10.22, 9.12, 8.45, 11.30, 7.83] (all finite -- no NaN/Infinity at any point, satisfying the
+     * unconditional safety net) -- first index within 0.8 km/h of 8.0 is index 12, past the
+     * original 10-fix budget. So the original bound does NOT hold as-is; it needed the same kind
+     * of empirical recalibration as Tasks 5-8, on this scenario's criterion only.
+     *
+     * Empirical sweep: actual SpeedEstimator (current, untouched constants) + SyntheticTrajectory,
+     * same outage/recovery shape (20 s good at 8 km/h, 8 s outage, 15 s recovery at 8 km/h,
+     * noiseStdMeters=3.5 throughout), before-outage portion fixed (matches the brief), recovery
+     * seed varied, judged at [toleranceKmh]=2.75 (reused from Task 5 -- not a new number invented
+     * for this test, same filter/same noise floor):
+     *   - The 5 canonical [seeds] (as the recovery seed): settle index 2 (seed 1), 9 (seed 7),
+     *     1 (seed 42), 3 (seed 99), 4 (seed 123) -- worst 9.
+     *   - Widened to 2000 seeds (1-2000) to find the general tail: mean settle index 2.65, max 12
+     *     (seed 199). This max was already 12 at 500 seeds and did not grow through 2000 -- 0 of
+     *     2000 seeds exceeded a 12-fix settle index, 13 of 2000 exceeded 8, only 1 of 2000
+     *     (seed 199 itself) exceeded 10 or 11.
+     * [maxFixesToSettleAfterOutage]=13 (used as an exclusive upper bound, `0 until 13`) keeps a
+     * 4-fix margin over the worst of the 5 canonical seeds actually asserted by this test (9), and
+     * -- unlike Task 7/8's overshoot/deviation tails, which stay open-ended even at thousands of
+     * seeds -- also covers the entire observed tail of the wider 2000-seed sweep (max 12) with a
+     * fix to spare, because this scenario's settle time is governed by the bounded covariance
+     * reset in `breakChain()` rather than open-ended noise-driven scatter. CAUTION: if this test's
+     * [seeds] list is ever widened, re-derive this bound against the new set rather than assuming
+     * it holds, per this file's established convention.
+     */
+    private val maxFixesToSettleAfterOutage = 13
+
+    @Test
+    fun gpsOutageRecoversWithoutInventingSpeed() {
+        for (recoverySeed in seeds) {
+            val estimator = SpeedEstimator()
+            val beforeOutage = SyntheticTrajectory.generate(
+                speedProfileKmh = listOf(20.0 to 8.0),
+                noiseStdMeters = 3.5,
+            )
+            beforeOutage.forEach { estimator.accept(it.position, reliable = true) }
+
+            // 8 seconds with no reliable fix -- mirrors how RunSessionService/DistanceAccumulator
+            // treat an outage: reliable=false, no real position update.
+            repeat(8) { i ->
+                val speed = estimator.accept(
+                    LocationPosition(0.0, 0.0, beforeOutage.last().position.elapsedRealtimeMillis + (i + 1) * 1_000L),
+                    reliable = false,
+                )
+                assertTrue("recovery seed $recoverySeed: produced non-finite speed during outage", speed.isFinite())
+            }
+
+            val afterOutage = SyntheticTrajectory.generate(
+                speedProfileKmh = listOf(15.0 to 8.0),
+                noiseStdMeters = 3.5,
+                startLatitude = beforeOutage.last().position.latitude,
+                startLongitude = beforeOutage.last().position.longitude,
+                startElapsedMillis = beforeOutage.last().position.elapsedRealtimeMillis + 9_000L,
+                seed = recoverySeed,
+            )
+            val recoveryEstimates = afterOutage.map { estimator.accept(it.position, reliable = true) }
+
+            recoveryEstimates.forEach {
+                assertTrue("recovery seed $recoverySeed: non-finite speed after recovery", it.isFinite())
+            }
+            // Same shape as the step-response test -- an outage is handled like a break in the
+            // chain (see DistanceAccumulator.breakChain semantics), so recovery restarts from
+            // scratch and needs a from-scratch warm-up budget, not an instant lock.
+            val settledIndex = recoveryEstimates.indexOfFirst { kotlin.math.abs(it - 8.0) < toleranceKmh }
+            assertTrue(
+                "recovery seed $recoverySeed: never settled within $toleranceKmh km/h of 8.0 km/h " +
+                    "in the ${recoveryEstimates.size} fixes after outage recovery",
+                settledIndex in 0 until maxFixesToSettleAfterOutage,
+            )
+        }
+    }
 }
