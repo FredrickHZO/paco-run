@@ -303,6 +303,58 @@ class SpeedEstimatorTest {
         }
     }
 
+    @Test
+    fun accuracyDegradationForcesQLowEvenWhenInnovationEmaWouldTriggerQHigh() {
+        // Converge at 5 km/h, then a sustained real jump to 12 km/h (mirrors
+        // sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise) so the innovation EMA
+        // climbs past innovationThreshold on its own -- this reproduces the "innovation alone
+        // would otherwise cross innovationThreshold" precondition from the task brief. Once qHigh
+        // has engaged from that real acceleration, feed one more fix whose accuracy suddenly
+        // collapses (the round-2 review's Task 8 finding: a severe accuracy degradation with no
+        // real motion change looks just like more real acceleration to the innovation detector).
+        // The accuracy gate must force qLow for that fix regardless of the already-elevated EMA.
+        val estimator = SpeedEstimator()
+        val metersPerDegree = 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+
+        fun step(speedKmh: Double, accuracy: Float): Double {
+            latitude += (speedKmh / 3.6) / metersPerDegree
+            elapsedMillis += 1_000L
+            return estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, accuracy), reliable = true)
+        }
+
+        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
+        repeat(15) { step(5.0, 3f) }
+
+        // 6 fixes at the new speed leaves the innovation EMA still above innovationThreshold
+        // (0.60) going into the next fix -- i.e. without the gate, the next fix's process-noise
+        // decision (which is made from the EMA accumulated by *prior* fixes, not its own
+        // measurement) would still resolve to qHigh.
+        var qHighEngaged = false
+        repeat(6) {
+            step(12.0, 3f)
+            if (estimator.getLastProcessNoise() > 0.4) qHighEngaged = true
+        }
+        assertTrue("precondition: qHigh should have engaged from the real acceleration", qHighEngaged)
+        assertTrue(
+            "precondition: innovation EMA must still be above threshold going into the degraded fix",
+            estimator.getLastInnovationEma() > 0.60,
+        )
+
+        // One more fix, same continuing true motion, but this fix's accuracy collapses to 30 m
+        // (10x the converged 3 m baseline) -- no new real motion change, just degraded accuracy.
+        step(12.0, 30f)
+
+        assertEquals(
+            "a severely degraded-accuracy fix must force qLow, even though the innovation EMA " +
+                "(from the preceding real acceleration) would otherwise say qHigh",
+            0.10,
+            estimator.getLastProcessNoise(),
+            0.001,
+        )
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

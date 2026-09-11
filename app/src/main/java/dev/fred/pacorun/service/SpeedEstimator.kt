@@ -23,6 +23,13 @@ class SpeedEstimator(
     // gives a better empirical trade-off between the two properties this switch must satisfy.
     private val innovationThreshold: Double = 0.60,
     private val innovationEmaAlpha: Double = 0.3,
+    // Task 1 (speed-estimator-accuracy-gate-and-export plan): an independent gate on top of the
+    // adaptive switch above, added after the prior plan's final review found the switch can be
+    // fooled by a sudden, severe accuracy degradation with no real motion change -- the raw
+    // position noise from bad accuracy looks just like a real acceleration to the innovation
+    // detector. See task-1-report.md for the empirical derivation of these two values.
+    private val accuracyDegradationRatio: Double = 1.8,
+    private val accuracyBaselineAlpha: Double = 0.1,
 ) {
     // Round-2 fix: an EMA of *unsigned* normalized innovation magnitude cannot tell a real
     // sustained acceleration apart from routine GPS noise -- a correctly-calibrated Kalman
@@ -90,10 +97,18 @@ class SpeedEstimator(
     private var eastInnovationEma: Double = 0.0
     private var northInnovationEma: Double = 0.0
     private var lastProcessNoise: Double = qLow
+    // Short-memory EMA baseline of horizontalAccuracyMeters, used by the accuracy gate below. A
+    // single-previous-fix baseline was explicitly rejected (see task-1-report.md): it would only
+    // catch the first fix of a multi-fix degraded burst, comparing each later fix against the
+    // already-degraded fix before it instead of against what accuracy actually looked like before
+    // the burst started.
+    private var accuracyBaselineMeters: Double? = null
+    private var lastAccuracyGateEngaged: Boolean = false
 
     // Test/debugging accessors (internal visibility)
     internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
     internal fun getLastProcessNoise(): Double = lastProcessNoise
+    internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) return breakChain()
@@ -104,6 +119,8 @@ class SpeedEstimator(
         val x = (position.longitude - lon0) * metersPerDegreeLongitude
         val y = (position.latitude - lat0) * METERS_PER_DEGREE_LATITUDE
 
+        val accuracyMeters = (position.horizontalAccuracyMeters ?: DEFAULT_HORIZONTAL_ACCURACY_METERS).coerceAtLeast(1f).toDouble()
+
         val east = eastAxis
         val north = northAxis
         val previousElapsed = lastElapsedRealtimeMillis
@@ -112,23 +129,43 @@ class SpeedEstimator(
             eastAxis = AxisKalman(x)
             northAxis = AxisKalman(y)
             lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
+            accuracyBaselineMeters = accuracyMeters
             return 0.0
         }
 
         val dtSeconds = (position.elapsedRealtimeMillis - previousElapsed) / 1_000.0
         if (dtSeconds <= 0.0) return breakChain()
 
-        val processNoise = if (maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma)) > innovationThreshold) qHigh else qLow
+        // Accuracy gate (Task 1): a fix whose accuracy has degraded well past the recent
+        // baseline gets qLow forced regardless of the innovation-EMA decision below, and its
+        // innovation is excluded from that EMA -- see the class-level comment on
+        // [accuracyBaselineMeters] for why this needs a smoothed baseline, not just the previous
+        // fix's accuracy.
+        val accuracyBaseline = accuracyBaselineMeters ?: accuracyMeters
+        val accuracyDegraded = accuracyMeters > accuracyBaseline * accuracyDegradationRatio
+        lastAccuracyGateEngaged = accuracyDegraded
+
+        val processNoise = if (accuracyDegraded) {
+            qLow
+        } else if (maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma)) > innovationThreshold) {
+            qHigh
+        } else {
+            qLow
+        }
         lastProcessNoise = processNoise
         east.predict(dtSeconds, processNoise)
         north.predict(dtSeconds, processNoise)
 
-        val accuracyMeters = (position.horizontalAccuracyMeters ?: DEFAULT_HORIZONTAL_ACCURACY_METERS).coerceAtLeast(1f)
-        val measurementVariance = accuracyMeters.toDouble().pow(2)
+        val measurementVariance = accuracyMeters.pow(2)
         east.update(x, measurementVariance)
         north.update(y, measurementVariance)
-        eastInnovationEma = innovationEmaAlpha * east.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * eastInnovationEma
-        northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
+        if (!accuracyDegraded) {
+            eastInnovationEma = innovationEmaAlpha * east.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * eastInnovationEma
+            northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
+        }
+        // Always update the baseline, even on a degraded fix, so it tracks reality rather than
+        // freezing on stale "good" data forever.
+        accuracyBaselineMeters = accuracyBaselineAlpha * accuracyMeters + (1 - accuracyBaselineAlpha) * accuracyBaseline
 
         lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
         val speed = hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
@@ -141,6 +178,7 @@ class SpeedEstimator(
         lastElapsedRealtimeMillis = null
         eastInnovationEma = 0.0
         northInnovationEma = 0.0
+        accuracyBaselineMeters = null
         return 0.0
     }
 
