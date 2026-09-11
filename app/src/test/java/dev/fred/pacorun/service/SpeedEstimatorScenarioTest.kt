@@ -287,16 +287,42 @@ class SpeedEstimatorScenarioTest {
      *     10.60 km/h (seed 1122). Exceed-rate by threshold: >4.0 km/h in 19.4% of seeds,
      *     >6.0 km/h in 2.9%, >7.0 km/h in 0.84%, >8.0 km/h in 0.38% (19/5000), >10.0 km/h in
      *     0.04% (2/5000).
-     * [maxDeviationKmh]=8.0 is calibrated to keep genuine margin (+3.48 km/h, 77% headroom) over
-     * the worst of the 5 canonical seeds actually asserted by this test (4.518 km/h). It is
+     * [maxDeviationKmh] was 8.0, calibrated to keep genuine margin (+3.48 km/h, 77% headroom) over
+     * the worst of the 5 canonical seeds actually asserted by this test (4.518 km/h). It was
      * explicitly NOT a validated general ceiling: the 5000-seed sweep found this exact scenario
-     * shape produces noise-driven deviations exceeding 8.0 km/h for ~0.38% of random seeds (worst
+     * shape produced noise-driven deviations exceeding 8.0 km/h for ~0.38% of random seeds (worst
      * observed 10.60 km/h), because a sudden, severe accuracy degradation hitting an
      * already-converged filter is intrinsically much noisier for this filter than the
-     * steady-state or gradual-ramp scenarios in Tasks 5-7. CAUTION: if this test's [seeds] list
-     * is ever widened, re-derive this bound against the new set rather than assuming it holds.
+     * steady-state or gradual-ramp scenarios in Tasks 5-7.
+     *
+     * Task 1 update (speed-estimator-accuracy-gate-and-export plan, task-1-report.md): the
+     * SpeedEstimator constructor above this test file's scope now has an independent
+     * accuracy-degradation gate (accuracyBaselineAlpha=0.05, accuracyDegradationRatio=2.0) that
+     * forces qLow on any fix whose accuracy has degraded past a slow-moving baseline -- exactly
+     * this scenario's failure mode (a converged filter suddenly hit by severely degraded accuracy
+     * with no real motion change). Re-running the identical empirical sweep above against the
+     * gated filter:
+     *   - The 5 canonical [seeds]: 1.980 (seed 1), 3.037 (seed 7), 1.924 (seed 42), 1.924
+     *     (seed 99), 2.796 (seed 123) -- worst 3.037 km/h (down from 4.518).
+     *   - Widened to 5000 seeds (1-5000): mean 2.739 km/h (down from 3.04), worst 7.038 km/h
+     *     (seed 2092, down from 10.60). Exceed-rate by threshold: >4.0 km/h in 11.1% of seeds
+     *     (556/5000, down from 19.4%), >6.0 km/h in 0.38% (19/5000, down from 2.9%), >8.0 km/h in
+     *     0% (0/5000, down from 0.38%).
+     * [maxDeviationKmh]=6.0 keeps genuine margin (+2.963 km/h, 98% headroom) over the worst of the
+     * 5 canonical seeds actually asserted by this test (3.037 km/h) -- a wider relative margin
+     * than the original 8.0 bound had (77%) -- while accepting the same ~0.38% tail-exceed rate
+     * at this threshold that the original bound accepted at 8.0, matching this file's established
+     * risk tolerance for these open-ended noise-driven scenarios (see Task 7's overshoot bound).
+     * It is still explicitly NOT a validated general ceiling, for the same reason as before: this
+     * transition remains intrinsically noisier than the steady-state/ramp scenarios, just
+     * substantially less so now that the gate exists. The gate's effect on this scenario is
+     * checked with a *constant* accuracy per segment (3.5 m then 20 m, same as the original
+     * scenario) -- this does not by itself validate the gate against real fix-to-fix accuracy
+     * jitter; that is checked separately in SpeedEstimatorTest.kt and against the real-run
+     * fixture (task-1-report.md's real-run sanity check). CAUTION: if this test's [seeds] list is
+     * ever widened, re-derive this bound against the new set rather than assuming it holds.
      */
-    private val maxDeviationKmh = 8.0
+    private val maxDeviationKmh = 6.0
 
     @Test
     fun degradedAccuracyBurstDoesNotProduceFalseSpeedSpikes() {
