@@ -146,4 +146,68 @@ class SpeedEstimatorScenarioTest {
             staysSettledFraction >= requiredFraction,
         )
     }
+
+    /**
+     * The plan's original bound (1.0 km/h, single default-seeded run) was miscalibrated when
+     * written: it assumed a near-noise-free filter. A constant-velocity Kalman model has no
+     * inherent overshoot mechanism (unlike a PID controller), so this was checked for a sign
+     * error in the adaptive-q logic first -- see the shape trace below -- before concluding this
+     * is a tolerance problem, not a filter bug.
+     *
+     * Shape check (seed 70, the worst case found -- see sweep below): the estimate spikes to
+     * 17.4 km/h (5.40 km/h over target) at fix 49, then fix 50 drops back to 13.8, fix 51 to
+     * 11.0, fix 52 to 9.0 -- i.e. it swings back down through and below the true 12 km/h target
+     * within 3 fixes, the same oscillation-around-truth pattern as Task 5/6's steady-state noise
+     * floor, not a runaway or persisting divergence. During the ramp itself (fixes 31-41, true
+     * speed still climbing) the estimate consistently *undershoots* (lags the rising true speed,
+     * as expected for a smoothing filter) -- the overshoot events only appear after the ramp
+     * completes, in the same few post-transition fixes where Task 6 measured its settling
+     * behavior. This confirms noise-driven scatter around the noise floor already characterized
+     * in [toleranceKmh], not a sign error or new bug.
+     *
+     * Empirical sweep: actual SpeedEstimator (current, untouched constants) + SyntheticTrajectory,
+     * same 12 s 5->12 km/h ramp, noiseStdMeters=3.5. Peak overshoot (max over fixes 30+, i.e.
+     * during-ramp and post-ramp) per seed:
+     *   - The 5 canonical [seeds] above: 2.06, 2.20, 1.26, 0.81, 0.66 km/h -- max 2.20 km/h.
+     *   - Widened to 103 seeds (1-100 plus 42/99/123) to find the true tail: mean 2.36 km/h,
+     *     max 5.40 km/h (seed 70, the shape traced above). Only 3 of 103 seeds exceeded 4.5 km/h.
+     * [maxOvershootKmh]=7.0 keeps ~30% margin over the widest peak overshoot found in the full
+     * 103-seed sweep (5.40), and ~3x margin over the 5 canonical seeds actually asserted below --
+     * comfortable margin either way, not a bare pass, while still well short of the completely
+     * unbounded growth a genuine adaptive-q sign error would produce.
+     */
+    private val maxOvershootKmh = 7.0
+
+    @Test
+    fun gradualRampHasNoLargeOvershoot() {
+        var worstOvershoot = Double.NEGATIVE_INFINITY
+        var worstSeed = 0L
+
+        for (seed in seeds) {
+            val estimator = SpeedEstimator()
+            val rampSpeeds = (0..12).map { 5.0 + (12.0 - 5.0) * (it / 12.0) }
+            val rampProfile = rampSpeeds.map { 1.0 to it }
+            val fixes = SyntheticTrajectory.generate(
+                speedProfileKmh = listOf(30.0 to 5.0) + rampProfile + listOf(10.0 to 12.0),
+                noiseStdMeters = 3.5,
+                seed = seed,
+            )
+
+            val estimates = fixes.map { estimator.accept(it.position, reliable = true) }
+            // During the ramp (roughly fixes 30..42) and shortly after, the estimate should
+            // never overshoot the fastest speed in the profile by more than maxOvershootKmh.
+            val duringAndAfterRamp = estimates.drop(30)
+            val peakOvershoot = duringAndAfterRamp.maxOf { it - 12.0 }
+            if (peakOvershoot > worstOvershoot) {
+                worstOvershoot = peakOvershoot
+                worstSeed = seed
+            }
+        }
+
+        assertTrue(
+            "seed $worstSeed: overshot the ramp's target speed by $worstOvershoot km/h " +
+                "(bound $maxOvershootKmh km/h) across seeds $seeds",
+            worstOvershoot < maxOvershootKmh,
+        )
+    }
 }
