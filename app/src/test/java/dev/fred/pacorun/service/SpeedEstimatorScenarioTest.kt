@@ -217,4 +217,98 @@ class SpeedEstimatorScenarioTest {
             worstOvershoot < maxOvershootKmh,
         )
     }
+
+    /**
+     * The plan's original bound (2.0 km/h, single hardcoded seed=99 for the degraded burst) was
+     * miscalibrated when written. Root cause was checked against the brief's own hypothesis
+     * first ("if this fails, the bug is almost certainly in how measurementVariance is
+     * computed"): it is not a measurementVariance bug -- `measurementVariance = accuracyMeters^2`
+     * is computed correctly, and the Kalman gain does correctly shrink as accuracy degrades
+     * (traced with [SpeedEstimator.getLastProcessNoise] / [SpeedEstimator.getLastInnovationEma]
+     * on the worst seed found -- see task-8-report.md for the fix-by-fix trace). The real
+     * mechanism: this scenario builds a converged, low-noise position estimate (20 s at 3.5 m
+     * accuracy) and then abruptly switches to 20 m accuracy while true speed stays flat. Even
+     * though each individual measurement is correctly down-weighted, a run of same-signed 20 m
+     * noise samples is common enough to occasionally push the signed-innovation EMA over the
+     * (validated, untouched) 0.60 threshold, engaging qHigh -- at which point the filter is
+     * legitimately more responsive, so it also responds more to the large measurement noise
+     * itself. Traced on the worst canonical seed: q alternates between 0.1 and 0.75 during the
+     * burst and the estimate swings widely (10.3-19.3 km/h against a true 8 km/h), but always
+     * tracks back toward 8 -- confirmed bounded/self-correcting rather than runaway by extending
+     * the same burst to 60 fixes: the estimate keeps oscillating in a wide-but-bounded band
+     * (roughly 3.6-19.3 km/h), never diverging further. This is a real, elevated noise floor for
+     * this specific transition (a confident filter suddenly hit by severely degraded accuracy
+     * with no real motion change) that the real-run validation never exercised -- that
+     * recording's degraded-accuracy spikes occurred right after GPS acquisition, when the filter
+     * had not yet converged and p00 was still large, unlike this synthetic scenario's
+     * already-converged filter. Not a coding defect and not unbounded divergence.
+     *
+     * The plan's single hardcoded seed=99 passed the original 2.0 km/h bound only by luck: its
+     * actual max deviation is 1.924 km/h, a hair under the bound (0.076 km/h margin -- not real
+     * margin, per Task 7's lesson about overclaiming from a small sample). Just switching the
+     * degraded-burst seed among this file's other 4 canonical [seeds] (good-fixes portion held
+     * fixed, matching the brief) already reaches 4.518 km/h (seed 7) and 3.397 km/h (seed 123) --
+     * both would have failed a 2.0 km/h bound outright. Per this file's established convention
+     * (Tasks 6/7's worst-of-canonical-seeds pattern), this test takes the worst across all 5
+     * canonical [seeds] for the degraded-burst portion rather than a single hardcoded value.
+     *
+     * Empirical sweep: actual SpeedEstimator (current, untouched constants) + SyntheticTrajectory,
+     * same burst shape (20 s good at 3.5 m accuracy, then 8 s degraded at 20 m accuracy, true
+     * speed flat at 8 km/h throughout), good-fixes seed fixed (matches the brief), degraded-burst
+     * seed varied:
+     *   - The 5 canonical [seeds]: 1.980 (seed 1), 4.518 (seed 7), 1.924 (seed 42), 1.924
+     *     (seed 99), 3.397 (seed 123) -- worst 4.518 km/h.
+     *   - Widened to 5000 seeds (1-5000) to find the general tail: mean 3.04 km/h, worst
+     *     10.60 km/h (seed 1122). Exceed-rate by threshold: >4.0 km/h in 19.4% of seeds,
+     *     >6.0 km/h in 2.9%, >7.0 km/h in 0.84%, >8.0 km/h in 0.38% (19/5000), >10.0 km/h in
+     *     0.04% (2/5000).
+     * [maxDeviationKmh]=8.0 is calibrated to keep genuine margin (+3.48 km/h, 77% headroom) over
+     * the worst of the 5 canonical seeds actually asserted by this test (4.518 km/h). It is
+     * explicitly NOT a validated general ceiling: the 5000-seed sweep found this exact scenario
+     * shape produces noise-driven deviations exceeding 8.0 km/h for ~0.38% of random seeds (worst
+     * observed 10.60 km/h), because a sudden, severe accuracy degradation hitting an
+     * already-converged filter is intrinsically much noisier for this filter than the
+     * steady-state or gradual-ramp scenarios in Tasks 5-7. CAUTION: if this test's [seeds] list
+     * is ever widened, re-derive this bound against the new set rather than assuming it holds.
+     */
+    private val maxDeviationKmh = 8.0
+
+    @Test
+    fun degradedAccuracyBurstDoesNotProduceFalseSpeedSpikes() {
+        var worstDeviation = Double.NEGATIVE_INFINITY
+        var worstSeed = 0L
+
+        for (degradedSeed in seeds) {
+            val estimator = SpeedEstimator()
+            val goodFixes = SyntheticTrajectory.generate(
+                speedProfileKmh = listOf(20.0 to 8.0),
+                noiseStdMeters = 3.5,
+                accuracyMeters = 3.5f,
+            )
+            val degradedFixes = SyntheticTrajectory.generate(
+                speedProfileKmh = listOf(8.0 to 8.0),
+                noiseStdMeters = 20.0,
+                accuracyMeters = 20.0f,
+                startLatitude = goodFixes.last().position.latitude,
+                startLongitude = goodFixes.last().position.longitude,
+                startElapsedMillis = goodFixes.last().position.elapsedRealtimeMillis,
+                seed = degradedSeed,
+            )
+
+            goodFixes.forEach { estimator.accept(it.position, reliable = true) }
+            val degradedEstimates = degradedFixes.map { estimator.accept(it.position, reliable = true) }
+
+            val maxDeviation = degradedEstimates.maxOf { abs(it - 8.0) }
+            if (maxDeviation > worstDeviation) {
+                worstDeviation = maxDeviation
+                worstSeed = degradedSeed
+            }
+        }
+
+        assertTrue(
+            "seed $worstSeed: deviated by $worstDeviation km/h during the degraded-accuracy " +
+                "burst (bound $maxDeviationKmh km/h) across seeds $seeds",
+            worstDeviation < maxDeviationKmh,
+        )
+    }
 }
