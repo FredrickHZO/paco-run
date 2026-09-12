@@ -52,6 +52,9 @@ class RunSessionService : Service() {
     private var lastTimerSecond = Long.MIN_VALUE
     private var lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
     private var gpsFreshness = GpsFreshnessTracker()
+    // Diagnostic-only (see GPX export): mirrors coordinator's inputs but its output never
+    // reaches coordinator/publish/RunSessionState -- it's read only for the exported TrackPoint.
+    private var speedEstimator = SpeedEstimator()
     private val notificationTracker = SessionNotificationTracker()
     private val trackPoints = mutableListOf<TrackPoint>()
 
@@ -128,6 +131,7 @@ class RunSessionService : Service() {
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
         gpsFreshness = GpsFreshnessTracker()
+        speedEstimator = SpeedEstimator()
         trackPoints.clear()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSession()
@@ -150,6 +154,15 @@ class RunSessionService : Service() {
         val now = SystemClock.elapsedRealtime()
         val sample = LocationSampleMapper().map(location, now)
         gpsFreshness.record(sample)
+        val position = LocationPosition(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            elapsedRealtimeMillis = TimeUnit.NANOSECONDS.toMillis(location.elapsedRealtimeNanos),
+            horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
+        )
+        // Diagnostic-only: same inputs coordinator?.tick receives below, but its output goes
+        // nowhere except the exported TrackPoint -- see the speedEstimator field comment.
+        val speedEstimatorKmh = speedEstimator.accept(position, reliable = sample.reliable)
         // Every raw fix, reliable or not -- so the exported track shows exactly what was
         // (and wasn't) trusted, which is the whole point of comparing it against another app.
         trackPoints += TrackPoint(
@@ -160,16 +173,12 @@ class RunSessionService : Service() {
             horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
             speedAccuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond,
             reliable = sample.reliable,
+            speedEstimatorKmh = speedEstimatorKmh,
         )
         coordinator?.tick(
             elapsedRealtimeMillis = now,
             sample = sample,
-            position = LocationPosition(
-                latitude = location.latitude,
-                longitude = location.longitude,
-                elapsedRealtimeMillis = TimeUnit.NANOSECONDS.toMillis(location.elapsedRealtimeNanos),
-                horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
-            ),
+            position = position,
         )
     }
 
