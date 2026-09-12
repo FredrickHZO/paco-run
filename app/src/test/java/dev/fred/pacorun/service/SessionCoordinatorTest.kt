@@ -250,6 +250,70 @@ class SessionCoordinatorTest {
     private fun unreliableSample(time: Long) = LocationSample(0f, null, false, time)
 
     @Test
+    fun speedEngineSyncsWithDistanceEngineOnReliableFixesAndOutage() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .0001, 1_000L))
+        assertEquals(2, speedEngine.acceptCalls)
+        assertEquals(0, speedEngine.breakChainCalls)
+
+        coordinator.advanceTimer(5_000L, signalGpsOutage = true)
+        assertEquals(1, speedEngine.breakChainCalls)
+    }
+
+    @Test
+    fun timerRetainsFreshGpsUsesSpeedEngineOutputNotRawSample() {
+        val speedEngine = FakeSpeedEngine(fixedOutput = 42.0)
+        val published = mutableListOf<RunSessionState>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false)
+
+        val state = published.last() as RunSessionState.Running
+        assertTrue(state.gpsReliable)
+        // Without the fix, this would read 9f (the raw sample's speedKmh, cached in
+        // latestReliableSample before the substitution) instead of 42f (the engine's output).
+        assertEquals(42f, state.speedKmh)
+    }
+
+    @Test
+    fun onSpeedComputedFiresOnlyOnActualReliableFixesWithEngineValue() {
+        val computed = mutableListOf<Double?>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(fixedOutput = 7.0),
+            onSpeedComputed = { computed += it },
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false) // grace window: must NOT fire
+        coordinator.advanceTimer(5_000L, signalGpsOutage = true) // outage: must NOT fire
+
+        assertEquals(listOf(7.0), computed)
+    }
+
+    @Test
     fun timerAndRoutineDoNotAdvanceBeforeFirstReliableFix() {
         val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
         val published = mutableListOf<RunSessionState>()
@@ -361,6 +425,23 @@ class SessionCoordinatorTest {
             events += "pace"
             samples += sample
             return result
+        }
+    }
+
+    private class FakeSpeedEngine(private val fixedOutput: Double = 0.0) : SessionSpeedEngine {
+        var acceptCalls = 0
+            private set
+        var breakChainCalls = 0
+            private set
+
+        override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double {
+            acceptCalls++
+            return fixedOutput
+        }
+
+        override fun breakChain(): Double {
+            breakChainCalls++
+            return 0.0
         }
     }
 }
