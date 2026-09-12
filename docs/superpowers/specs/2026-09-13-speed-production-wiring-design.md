@@ -57,11 +57,16 @@ class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstima
 
 **Fix:** `SessionCoordinator` deve tenere un proprio `latestEngineSpeedKmh: Double` (nome indicativo), aggiornato ogni volta che `speedEngine.accept(...)` viene chiamato con successo, e riusato al posto di `latestReliableSample.speedKmh` durante `timerRetainsFreshGps`. Va azzerato/reimpostato negli stessi punti in cui oggi si azzera `latestReliableSample` (entrata in outage, ecc.), per restare coerente con lo stesso ciclo di vita.
 
-## 5. Consolidamento del `SpeedEstimator` diagnostico — RIMANDATO, non in questa fase
+## 5. Consolidamento del `SpeedEstimator` diagnostico — OBBLIGATORIO in questa fase, non rimandabile
 
-**Ripensandoci con più attenzione, ritiro la proposta iniziale.** L'idea di far leggere a `RunSessionService` il valore da `RunSessionState.speedKmh` invece di mantenere una seconda istanza ha un problema reale: quel campo è **azzerato quando `gpsReliable` è falso** (`paceSample.speedKmh.takeIf { gpsReliable }`), mentre l'export diagnostico oggi scrive un valore per **ogni singolo fix, affidabile o no** (è voluto, serve proprio per vedere cosa succede nei fix scartati). Consolidare come proposto perderebbe dati diagnostici nei momenti meno affidabili — esattamente i momenti più interessanti da controllare.
+**Corretto due volte ora — la prima proposta (leggere da `RunSessionState.speedKmh`) era sbagliata, ma "rimandarlo" era sbagliato anche peggio.** Motivo: se le due istanze (diagnostica e di produzione) restano separate, ricevono input diversi (quella diagnostica gira su ogni fix, quella di produzione solo sui fix che `SessionCoordinator` considera affidabili) — con input diversi, i due calcoli Kalman **divergono nel tempo**, anche partendo dallo stesso algoritmo. Il file GPX smetterebbe di rappresentare quello che l'app usa davvero per i cue, **falsando esattamente le 5 corse di validazione della sezione 7** — che devono validare il comportamento reale, non un calcolo parallelo scollegato.
 
-Risolverlo per bene richiede pensarci con calma a parte (es. esporre l'output grezzo del motore separatamente dal valore filtrato per l'affidabilità, senza toccare la semantica di `RunSessionState`) — **non lo includo in questa fase**. Si tengono le due istanze separate come oggi (piccolo spreco di calcolo, nessun rischio di comportamento) finché non si progetta il consolidamento con la stessa cura del resto.
+**Soluzione (pulita, non quella scartata prima):**
+- Una sola istanza di `SpeedEstimator`, condivisa tra produzione e diagnostica.
+- `SessionCoordinator` guadagna un parametro opzionale nel costruttore, stesso stile già in uso per `onCues`/`publish`: `onSpeedComputed: (Double?) -> Unit = {}` — invocato ogni volta che `speedEngine.accept(...)` viene effettivamente chiamato con successo (quindi con lo stesso identico valore usato per pace/stato/routine), non invocato altrimenti.
+- `RunSessionService` passa questo callback per catturare il valore e scriverlo nel `TrackPoint` del GPX, al posto del secondo `SpeedEstimator` indipendente che ha oggi.
+
+**Conseguenza esplicita da accettare, non un difetto:** il campo `pr:speedEstimatorKmh` nel GPX, da questa fase in poi, sarà presente solo nei fix che `SessionCoordinator` considera affidabili — non più su ogni fix come nella versione solo-diagnostica di oggi. È corretto: da qui in poi il file deve rispecchiare esattamente cosa l'app ha usato dal vivo, non un calcolo scollegato che gira sempre.
 
 ## 6. Il motore di default — la vera decisione di questa fase
 
@@ -83,6 +88,5 @@ Risolverlo per bene richiede pensarci con calma a parte (es. esporre l'output gr
 ## 9. Fuori scope per questa fase
 
 - Rimozione di `DopplerSpeedEngine` (rimandata al criterio della sezione 7).
-- Consolidamento del `SpeedEstimator` diagnostico in un'unica istanza (rimandato, sezione 5 — richiede una progettazione a parte per non perdere dati sui fix inaffidabili).
 - Qualunque lavoro della zona GPS (Fase 1, branch `feature/gps-precision`) o inerziale (Fase 2).
 - G12 (Doppler grezzo per satellite) — nome simile a "Doppler" ma concetto diverso (dati satellitari grezzi, non `location.speed`), non correlato a `DopplerSpeedEngine` di questo documento.
