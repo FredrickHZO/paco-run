@@ -19,7 +19,7 @@ class GpxExporterTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val fileName = "paco-run-export-test-${System.currentTimeMillis()}.gpx"
         val contents = GpxWriter.build(
-            listOf(TrackPoint(45.4642, 9.1900, 0L, 2.5f, 4f, .2f, true)),
+            listOf(TrackPoint(45.4642, 9.1900, 0L, 2.5f, 4f, .2f, true, 9.0)),
             activityName = "Test",
         )
 
