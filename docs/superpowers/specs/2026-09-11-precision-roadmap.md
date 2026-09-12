@@ -34,7 +34,34 @@ Questa sezione è la fonte di verità sullo stato di OGNI voce. Se una sezione p
 | ML/reti neurali | Escluso permanentemente | Richiesta esplicita dell'utente |
 | Radar/telecamera | Escluso permanentemente | Impraticabile per uso mobile in corsa |
 
+| G12 — velocità da Doppler grezzo per-satellite | **Confermato, priorità altissima** | Fase 2.5, subito dopo la zona inerziale — riusa l'arbitro dell'Approccio B |
+| G13 — modello CA (accelerazione costante) invece di CV | **Confermato, priorità alta** | Raggruppato con G5, stesso file/stesso costo di riapertura, rimandato ma prima di RTK/INS |
+
 **Unica decisione ancora aperta che blocca la pianificazione dettagliata della Fase 1 (zona GPS): G8.**
+
+## Aggiornamento 2026-09-13 — due nuove voci ad altissima priorità, esplicitamente per la velocità
+
+Contesto: seconda corsa reale (2026-09-12) validata con successo (vedi `docs/superpowers/specs/2026-09-10-speed-accuracy-design.md`), poi confronto punto-per-punto Strava/Paco Run che ha dimostrato che le divergenze osservate sono artefatti del metodo di confronto (finestra di smoothing), non disaccordi reali tra i due telefoni — utile ma ha chiarito che Strava (stesso telefono, stesso GPS) non può fare da arbitro indipendente per la velocità puntuale, e l'utente non ha accesso a un campo da corsa certificato per un test fisico indipendente. Priorità dichiarata dall'utente: la velocità istantanea conta più di tutto il resto del documento — è il prodotto.
+
+### G12 — Velocità da Doppler grezzo per-satellite (NUOVO, priorità altissima)
+
+- **Algoritmo:** ogni satellite GNSS trasmette, oltre alla posizione, un dato di quanto velocemente la distanza satellite-ricevitore sta cambiando (effetto Doppler) — accessibile grezzo per singolo satellite tramite Android `GnssMeasurement.getPseudorangeRateMetersPerSecond()`, **senza richiedere la risoluzione dell'ambiguità di fase** che rende dura la posizione RTK/INS (G4). Combinando il Doppler di più satelliti con un minimi-quadrati pesato (pesato per qualità del segnale, C/N0) si ottiene una velocità tipicamente molto più precisa di `location.speed`, perché il Doppler è quasi immune al multipath che degrada invece la posizione/pseudorange.
+- **Perché lo vogliamo:** è la metà "facile" di RTK/INS, quella che risponde direttamente e solo alla priorità dichiarata dall'utente (velocità), senza pagare il costo della metà dura (posizione centimetrica).
+- **Rischi reali, non ipotetici:**
+  1. Serve un numero minimo di satelliti con buona geometria — con pochi satelliti o geometria scadente (satelliti ammassati nella stessa zona di cielo) la soluzione degrada, serve un controllo di qualità (satelliti visti + loro distribuzione) prima di fidarsi del risultato in quell'istante specifico.
+  2. Anche il Doppler può avere dati anomali per singolo satellite (meno soggetto al multipath della posizione, ma non immune) — serve pesatura per qualità del segnale (C/N0) e rigetto/degrado dei satelliti sospetti, stessa filosofia di Huber/RAIM (G6/G3) riapplicata qui.
+  3. Il drift dell'orologio interno del chip GPS va risolto congiuntamente alla velocità (un calcolo a più incognite: velocità + drift orologio), non ignorato — altrimenti il drift si traveste da errore di velocità.
+  4. **Il rischio più subdolo: non ripetere l'errore di `location.speed`.** Quell'errore non stava nel Doppler in sé, stava nel fidarsi ciecamente di un numero già confezionato da Android il cui margine di errore dichiarato non rifletteva il suo vero comportamento. Costruendo questa soluzione da satelliti grezzi, va caratterizzata e validata da zero con lo stesso rigore (test sintetici + corse reali) — "è dato grezzo" non vuol dire "automaticamente meglio", va dimostrato.
+  5. Supporto variabile per dispositivo (stesso discorso di G4: serve `GnssCapabilities` controllato all'avvio, e un ripiego pulito quando non disponibile/affidabile — anche momento per momento dentro la stessa corsa, non solo sì/no fisso per l'intera sessione).
+- **Come farlo bene:** minimi quadrati pesati (non media semplice) con peso per satellite basato su C/N0; controllo minimo su numero/geometria satelliti prima di fidarsi del fix in quell'istante, con ripiego automatico se insufficiente; stima congiunta del drift dell'orologio; **architetturalmente NON iniettarlo come misura diretta dentro il Kalman di `SpeedEstimator`** (rischio di ripetere l'errore di `location.speed`) — trattarlo come uno stimatore indipendente, combinato tramite lo stesso arbitro a fiducia dinamica dell'Approccio B già usato per l'accelerometro (I1), come terza fonte; stessa disciplina di validazione (sintetico poi corsa reale) di tutto il resto.
+- **Sequenza:** Fase 2.5, subito dopo la zona inerziale (I1-I5) — riusa l'arbitro già costruito lì invece di costruirne uno nuovo da zero. **Non è più raggruppato con G4** (che resta solo la parte posizione/ambiguità di fase, quella dura, Fase 4).
+
+### G13 — Modello a "accelerazione costante" (CA) invece di "velocità costante" (CV) nel filtro (NUOVO, priorità alta)
+
+- **Algoritmo:** il Kalman di `SpeedEstimator` oggi assume velocità costante finché l'interruttore adattivo non rileva un'accelerazione (modello "CV", l'accelerazione è trattata come rumore da tollerare). Il modello "CA" tratta l'accelerazione come parte esplicita dello stato tracciato, non come rumore da scoprire dopo — più naturale nei momenti di vera accelerazione sostenuta.
+- **Perché lo vogliamo:** raffinamento diretto del cuore matematico già esistente, non un sistema nuovo.
+- **Downside/rischio:** tocca lo stesso file già validato (`SpeedEstimator`) di G5 (IMM) — stessa categoria di costo (ri-validazione completa).
+- **Sequenza:** **raggruppato con G5 (IMM)**, stesso motivo (stesso file, stesso tipo di costo di riapertura) — quando si decide di affrontare G5, si valuta insieme anche questo, un'unica riapertura invece di due. Resta comunque "rimandato, ma prima di RTK/INS" come già deciso per G5.
 
 ## Architettura a due motori (chiarito 2026-09-11, correzione importante rispetto al ragionamento iniziale)
 
