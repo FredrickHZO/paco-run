@@ -193,7 +193,7 @@ class SessionCoordinator(
     private val publish: (RunSessionState) -> Unit,
     private val startedAtElapsedMillis: Long = 0L,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
-    private val speedEngine: SessionSpeedEngine = DopplerSpeedEngine(),
+    private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
     private val onSpeedComputed: (Double?) -> Unit = {},
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
@@ -310,7 +310,7 @@ class PendingSessionCoordinator(
     private val paceEvaluator: SessionPaceEvaluator,
     private val onCues: (List<AudioCue>, Float) -> Unit,
     private val publish: (RunSessionState) -> Unit,
-    private val speedEngine: SessionSpeedEngine = DopplerSpeedEngine(),
+    private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
     private val onSpeedComputed: (Double?) -> Unit = {},
 ) {
     private var activeCoordinator: SessionCoordinator? = null

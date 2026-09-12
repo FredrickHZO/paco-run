@@ -31,6 +31,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(
@@ -70,6 +71,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .00001, 1_000L))
@@ -94,6 +96,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, sample = null, position = null)
@@ -119,6 +122,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -138,6 +142,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -161,6 +166,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -182,6 +188,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -210,6 +217,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 11f, null)),
             onCues = { values, _ -> cues += values },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(11f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -234,6 +242,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.advanceTimer(0L, signalGpsOutage = true)
@@ -323,6 +332,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
             onCues = { _, _ -> },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         pending.advanceTimer(10_000L, signalGpsOutage = true)
@@ -342,6 +352,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GPS_WEAK, null, null)),
             onCues = { _, _ -> },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         pending.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, 0.0, 1_000L))
@@ -361,6 +372,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
             onCues = { _, _ -> },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         pending.tick(12_000L, reliableSample(8f, 12_000L), LocationPosition(0.0, 0.0, 12_000L))
@@ -380,6 +392,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         pending.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
