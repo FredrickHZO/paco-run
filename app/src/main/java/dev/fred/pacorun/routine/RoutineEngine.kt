@@ -174,6 +174,10 @@ class RoutineEngine(private val preferences: RunPreferences) {
         lastTimingCheckMillis = intervalStartedAtMillis - 1L
     }
 
+    // Via String, non un cast diretto: un Float->Double diretto (es. 7.5f.toDouble()) porta
+    // dietro l'imprecisione binaria del Float originale (es. 7.4999998...), che qui
+    // si propaga nei metri e può disallineare i confronti di soglia. Il giro per String
+    // riparte dalla rappresentazione decimale "pulita" che il Float mostra quando stampato.
     private fun kmToMeters(km: Float) = km.toString().toDouble() * 1_000.0
 
     private fun result(cues: List<RoutineCue>, profileChanged: Boolean) = RoutineResult(
