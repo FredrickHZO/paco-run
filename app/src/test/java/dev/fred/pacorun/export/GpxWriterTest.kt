@@ -29,6 +29,7 @@ class GpxWriterTest {
                     horizontalAccuracyMeters = 4.5f,
                     speedAccuracyMps = 0.2f,
                     reliable = true,
+                    speedEstimatorKmh = 9.0,
                 ),
             ),
             activityName = "Paco Run",
@@ -51,6 +52,7 @@ class GpxWriterTest {
                     horizontalAccuracyMeters = 12.5f,
                     speedAccuracyMps = 0.3f,
                     reliable = false,
+                    speedEstimatorKmh = 11.2,
                 ),
             ),
             activityName = "Paco Run",
@@ -60,6 +62,27 @@ class GpxWriterTest {
         assertTrue(gpx.contains("<pr:horizontalAccuracyMeters>12.5</pr:horizontalAccuracyMeters>"))
         assertTrue(gpx.contains("<pr:speedAccuracyMps>0.3</pr:speedAccuracyMps>"))
         assertTrue(gpx.contains("<pr:reliable>false</pr:reliable>"))
+    }
+
+    @Test
+    fun pointExtensionsCarrySpeedEstimatorKmhUnconditionally() {
+        val gpx = GpxWriter.build(
+            listOf(
+                TrackPoint(
+                    latitude = 0.0,
+                    longitude = 0.0,
+                    timeEpochMillis = 0L,
+                    speedMps = null,
+                    horizontalAccuracyMeters = null,
+                    speedAccuracyMps = null,
+                    reliable = true,
+                    speedEstimatorKmh = 7.35,
+                ),
+            ),
+            activityName = "Paco Run",
+        )
+
+        assertTrue(gpx.contains("<pr:speedEstimatorKmh>7.35</pr:speedEstimatorKmh>"))
     }
 
     @Test
@@ -74,6 +97,7 @@ class GpxWriterTest {
                     horizontalAccuracyMeters = null,
                     speedAccuracyMps = null,
                     reliable = true,
+                    speedEstimatorKmh = 0.0,
                 ),
             ),
             activityName = "Paco Run",
@@ -87,9 +111,9 @@ class GpxWriterTest {
     fun multiplePointsPreserveOrder() {
         val gpx = GpxWriter.build(
             listOf(
-                TrackPoint(0.0, 0.0, 0L, null, null, null, true),
-                TrackPoint(0.001, 0.001, 1_000L, null, null, null, true),
-                TrackPoint(0.002, 0.002, 2_000L, null, null, null, true),
+                TrackPoint(0.0, 0.0, 0L, null, null, null, true, 0.0),
+                TrackPoint(0.001, 0.001, 1_000L, null, null, null, true, 0.0),
+                TrackPoint(0.002, 0.002, 2_000L, null, null, null, true, 0.0),
             ),
             activityName = "Paco Run",
         )

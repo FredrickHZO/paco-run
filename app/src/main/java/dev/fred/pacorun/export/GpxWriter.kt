@@ -12,6 +12,9 @@ data class TrackPoint(
     val horizontalAccuracyMeters: Float?,
     val speedAccuracyMps: Float?,
     val reliable: Boolean,
+    // Diagnostic-only: SpeedEstimator's own speed output, always defined (0.0 during warmup,
+    // never null -- unlike the fields above, there's no "unavailable" case to model here).
+    val speedEstimatorKmh: Double,
 )
 
 // Standard GPX 1.1 trkpt/time so any GPX viewer (or Strava, for a side-by-side comparison)
@@ -46,6 +49,7 @@ object GpxWriter {
         point.horizontalAccuracyMeters?.let { appendLine("          <pr:horizontalAccuracyMeters>$it</pr:horizontalAccuracyMeters>") }
         point.speedAccuracyMps?.let { appendLine("          <pr:speedAccuracyMps>$it</pr:speedAccuracyMps>") }
         appendLine("          <pr:reliable>${point.reliable}</pr:reliable>")
+        appendLine("          <pr:speedEstimatorKmh>${point.speedEstimatorKmh}</pr:speedEstimatorKmh>")
         appendLine("        </extensions>")
         appendLine("      </trkpt>")
     }
