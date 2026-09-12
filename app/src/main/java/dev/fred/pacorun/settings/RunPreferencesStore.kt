@@ -95,8 +95,6 @@ class RunPreferencesStore(private val context: Context) {
         values[Keys.walkSeconds] = preferences.walkSeconds
         values[Keys.routineUnlimited] = preferences.routineUnlimited
         values[Keys.routineKm] = preferences.routineKm
-        values[Keys.minKmh] = preferences.constantRange.minKmh
-        values[Keys.maxKmh] = preferences.constantRange.maxKmh
         values[Keys.confirmationSamples] = preferences.confirmationSamples
         values[Keys.repeatMillis] = preferences.repeatMillis
         values[Keys.gpsCuesEnabled] = preferences.gpsCuesEnabled
