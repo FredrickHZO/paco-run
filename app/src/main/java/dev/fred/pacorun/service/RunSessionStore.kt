@@ -310,6 +310,8 @@ class PendingSessionCoordinator(
     private val paceEvaluator: SessionPaceEvaluator,
     private val onCues: (List<AudioCue>, Float) -> Unit,
     private val publish: (RunSessionState) -> Unit,
+    private val speedEngine: SessionSpeedEngine = DopplerSpeedEngine(),
+    private val onSpeedComputed: (Double?) -> Unit = {},
 ) {
     private var activeCoordinator: SessionCoordinator? = null
 
@@ -338,6 +340,8 @@ class PendingSessionCoordinator(
             onCues = onCues,
             publish = publish,
             startedAtElapsedMillis = startedAtElapsedMillis,
+            speedEngine = speedEngine,
+            onSpeedComputed = onSpeedComputed,
         ).also { activeCoordinator = it }
 }
 
