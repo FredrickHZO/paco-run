@@ -53,9 +53,15 @@ class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstima
 
 `speedEngine.accept(...)` e `speedEngine.breakChain()` vanno chiamati **negli stessi identici punti** dove oggi vengono chiamati `distanceEngine.accept(...)`/`distanceEngine.breakChain()` — stesso `actualReliable`, stesso `enteredOutage`. Non si inventa un secondo giudizio di affidabilità da conciliare: i due motori restano sincronizzati perché condividono lo stesso segnale già esistente e già collaudato.
 
-## 5. Consolidamento del `SpeedEstimator` diagnostico
+**Correzione importante (trovata rileggendo con più attenzione, non presente nella prima stesura):** questo NON basta per la velocità, a differenza della distanza. Oggi `SessionCoordinator` ha un terzo caso, oltre a "fix affidabile" e "outage" — la finestra di grazia `timerRetainsFreshGps` (nessun nuovo fix, GPS considerato ancora "fresco" per qualche secondo), in cui riusa **l'ultimo campione affidabile** (`latestReliableSample`) invece di azzerare tutto di colpo. Per la distanza questo non è un problema (0 metri aggiunti in quella finestra è corretto). Per la velocità sarebbe un problema: senza gestirlo esplicitamente, in quella finestra il valore andrebbe preso da `latestReliableSample.speedKmh` — che oggi è il campo Doppler grezzo, non l'ultimo output del motore Kalman. Risultato: proprio nei momenti di "grazia", il numero mostrato/usato per i cue tornerebbe silenziosamente al vecchio Doppler invece di restare sul valore Kalman più recente.
 
-Oggi `RunSessionService` mantiene un `SpeedEstimator` separato, usato solo per scrivere `pr:speedEstimatorKmh` nel GPX. Con `KalmanSpeedEngine` dentro `SessionCoordinator`, avremmo due istanze indipendenti che calcolano la stessa cosa in parallelo — spreco e rischio (piccolo) di disallineamento. **Consolidare in una sola istanza**: `RunSessionService` costruisce un `KalmanSpeedEngine`, lo passa a `SessionCoordinator`, e legge il valore per il GPX da `RunSessionState.speedKmh` (già pubblicato dopo ogni fix) invece di mantenere un secondo calcolo a parte.
+**Fix:** `SessionCoordinator` deve tenere un proprio `latestEngineSpeedKmh: Double` (nome indicativo), aggiornato ogni volta che `speedEngine.accept(...)` viene chiamato con successo, e riusato al posto di `latestReliableSample.speedKmh` durante `timerRetainsFreshGps`. Va azzerato/reimpostato negli stessi punti in cui oggi si azzera `latestReliableSample` (entrata in outage, ecc.), per restare coerente con lo stesso ciclo di vita.
+
+## 5. Consolidamento del `SpeedEstimator` diagnostico — RIMANDATO, non in questa fase
+
+**Ripensandoci con più attenzione, ritiro la proposta iniziale.** L'idea di far leggere a `RunSessionService` il valore da `RunSessionState.speedKmh` invece di mantenere una seconda istanza ha un problema reale: quel campo è **azzerato quando `gpsReliable` è falso** (`paceSample.speedKmh.takeIf { gpsReliable }`), mentre l'export diagnostico oggi scrive un valore per **ogni singolo fix, affidabile o no** (è voluto, serve proprio per vedere cosa succede nei fix scartati). Consolidare come proposto perderebbe dati diagnostici nei momenti meno affidabili — esattamente i momenti più interessanti da controllare.
+
+Risolverlo per bene richiede pensarci con calma a parte (es. esporre l'output grezzo del motore separatamente dal valore filtrato per l'affidabilità, senza toccare la semantica di `RunSessionState`) — **non lo includo in questa fase**. Si tengono le due istanze separate come oggi (piccolo spreco di calcolo, nessun rischio di comportamento) finché non si progetta il consolidamento con la stessa cura del resto.
 
 ## 6. Il motore di default — la vera decisione di questa fase
 
@@ -71,10 +77,12 @@ Oggi `RunSessionService` mantiene un `SpeedEstimator` separato, usato solo per s
 
 `SpeedEstimator` è testato benissimo da solo, e le sue corse reali confermano l'algoritmo — ma **mai integrato dentro la macchina a stati di `SessionCoordinator`** (outage/conferma ritmo/routine). Il piano di implementazione dovrà includere:
 - Test unitari in stile `SessionCoordinatorTest.kt` con `KalmanSpeedEngine` collegato, che verificano il comportamento su outage/recovery (il motore si resetta in sincrono con la distanza) e sulla conferma del cambio ritmo (`confirmationSamples`) con valori realistici.
+- **Test dedicato per la finestra di grazia (`timerRetainsFreshGps`, sezione 4):** un tick senza nuovo fix subito dopo un fix Kalman valido deve riportare `latestEngineSpeedKmh` (il valore Kalman), non il vecchio campo Doppler di `latestReliableSample` — questo è il bug trovato in revisione, va coperto esplicitamente da un test che lo avrebbe fatto fallire prima della correzione.
 - Un replay di sanità di almeno una delle due corse reali già disponibili attraverso il vero `SessionCoordinator` integrato (non solo `SpeedEstimator` da solo) — per confermare che i cue emessi con la nuova fonte di velocità abbiano senso, non solo che il numero grezzo sia più preciso.
 
 ## 9. Fuori scope per questa fase
 
 - Rimozione di `DopplerSpeedEngine` (rimandata al criterio della sezione 7).
+- Consolidamento del `SpeedEstimator` diagnostico in un'unica istanza (rimandato, sezione 5 — richiede una progettazione a parte per non perdere dati sui fix inaffidabili).
 - Qualunque lavoro della zona GPS (Fase 1, branch `feature/gps-precision`) o inerziale (Fase 2).
 - G12 (Doppler grezzo per satellite) — nome simile a "Doppler" ma concetto diverso (dati satellitari grezzi, non `location.speed`), non correlato a `DopplerSpeedEngine` di questo documento.
