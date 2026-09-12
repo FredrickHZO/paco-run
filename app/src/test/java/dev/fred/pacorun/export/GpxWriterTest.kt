@@ -65,7 +65,7 @@ class GpxWriterTest {
     }
 
     @Test
-    fun pointExtensionsCarrySpeedEstimatorKmhUnconditionally() {
+    fun pointExtensionsCarrySpeedEstimatorKmhWhenPresent() {
         val gpx = GpxWriter.build(
             listOf(
                 TrackPoint(
@@ -83,6 +83,27 @@ class GpxWriterTest {
         )
 
         assertTrue(gpx.contains("<pr:speedEstimatorKmh>7.35</pr:speedEstimatorKmh>"))
+    }
+
+    @Test
+    fun speedEstimatorKmhOmittedWhenNull() {
+        val gpx = GpxWriter.build(
+            listOf(
+                TrackPoint(
+                    latitude = 0.0,
+                    longitude = 0.0,
+                    timeEpochMillis = 0L,
+                    speedMps = null,
+                    horizontalAccuracyMeters = null,
+                    speedAccuracyMps = null,
+                    reliable = false,
+                    speedEstimatorKmh = null,
+                ),
+            ),
+            activityName = "Paco Run",
+        )
+
+        assertTrue(!gpx.contains("<pr:speedEstimatorKmh>"))
     }
 
     @Test

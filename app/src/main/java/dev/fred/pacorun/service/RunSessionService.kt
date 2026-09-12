@@ -52,9 +52,9 @@ class RunSessionService : Service() {
     private var lastTimerSecond = Long.MIN_VALUE
     private var lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
     private var gpsFreshness = GpsFreshnessTracker()
-    // Diagnostic-only (see GPX export): mirrors coordinator's inputs but its output never
-    // reaches coordinator/publish/RunSessionState -- it's read only for the exported TrackPoint.
-    private var speedEstimator = SpeedEstimator()
+    // Diagnostic-only: captures the shared production engine's output for the current fix, so
+    // the exported TrackPoint can reuse it -- see onLocation() and the onSpeedComputed wiring.
+    private var lastEngineSpeedKmh: Double? = null
     private val notificationTracker = SessionNotificationTracker()
     private val trackPoints = mutableListOf<TrackPoint>()
 
@@ -127,11 +127,11 @@ class RunSessionService : Service() {
             paceEvaluator = PaceEvaluatorAdapter(PaceEvaluator(preferences.paceConfig())),
             onCues = { cues, volume -> cuePlayer?.enqueue(cues, volume) },
             publish = ::publish,
+            onSpeedComputed = { lastEngineSpeedKmh = it },
         )
         lastTimerSecond = Long.MIN_VALUE
         lastLocationElapsedRealtimeNanos = Long.MIN_VALUE
         gpsFreshness = GpsFreshnessTracker()
-        speedEstimator = SpeedEstimator()
         trackPoints.clear()
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             stopSession()
@@ -160,11 +160,15 @@ class RunSessionService : Service() {
             elapsedRealtimeMillis = TimeUnit.NANOSECONDS.toMillis(location.elapsedRealtimeNanos),
             horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
         )
-        // Diagnostic-only: same inputs coordinator?.tick receives below, but its output goes
-        // nowhere except the exported TrackPoint -- see the speedEstimator field comment.
-        val speedEstimatorKmh = speedEstimator.accept(position, reliable = sample.reliable)
+        lastEngineSpeedKmh = null
+        coordinator?.tick(
+            elapsedRealtimeMillis = now,
+            sample = sample,
+            position = position,
+        )
         // Every raw fix, reliable or not -- so the exported track shows exactly what was
-        // (and wasn't) trusted, which is the whole point of comparing it against another app.
+        // (and wasn't) trusted. speedEstimatorKmh is null when the fix was fully unreliable
+        // (the shared engine was never called for it, by design -- see spec section 5).
         trackPoints += TrackPoint(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -173,12 +177,7 @@ class RunSessionService : Service() {
             horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
             speedAccuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond,
             reliable = sample.reliable,
-            speedEstimatorKmh = speedEstimatorKmh,
-        )
-        coordinator?.tick(
-            elapsedRealtimeMillis = now,
-            sample = sample,
-            position = position,
+            speedEstimatorKmh = lastEngineSpeedKmh,
         )
     }
 
