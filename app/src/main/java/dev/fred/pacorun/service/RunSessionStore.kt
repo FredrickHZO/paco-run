@@ -94,6 +94,11 @@ data class LocationPosition(
     val horizontalAccuracyMeters: Float? = null,
 )
 
+interface SessionDistanceEngine {
+    fun accept(position: LocationPosition, reliable: Boolean): Double
+    fun breakChain(): Double
+}
+
 class DistanceAccumulator(
     private val maxSpeedMetersPerSecond: Double = 15.0,
     // Floor: even with excellent reported accuracy, don't trust movement below this as real
@@ -105,7 +110,7 @@ class DistanceAccumulator(
     // Half the combined accuracy of the two points is a standard "more likely real than noise"
     // heuristic for roughly-Gaussian position error.
     private val jitterAccuracyFraction: Double = 0.5,
-) {
+) : SessionDistanceEngine {
     private var anchor: LocationPosition? = null
     // Last accepted raw fix, tracked separately from `anchor`: the anchor can stay frozen for
     // many seconds while jitter-suppressed movement accrues, which would otherwise widen the
@@ -113,7 +118,7 @@ class DistanceAccumulator(
     // sane for a single fix-to-fix gap. The sanity check always measures against this instead.
     private var lastFix: LocationPosition? = null
 
-    fun accept(position: LocationPosition, reliable: Boolean): Double {
+    override fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) return breakChain()
         val previousAnchor = anchor
         val previousFix = lastFix
@@ -144,7 +149,7 @@ class DistanceAccumulator(
         return maxOf(minMovementMeters, combinedAccuracy * jitterAccuracyFraction)
     }
 
-    fun breakChain(): Double = 0.0.also { anchor = null; lastFix = null }
+    override fun breakChain(): Double = 0.0.also { anchor = null; lastFix = null }
 
     private fun LocationPosition.isValid() = latitude.isFinite() && longitude.isFinite() &&
         latitude in -90.0..90.0 && longitude in -180.0..180.0
@@ -174,7 +179,7 @@ class SessionCoordinator(
     private val onCues: (List<AudioCue>, Float) -> Unit,
     private val publish: (RunSessionState) -> Unit,
     private val startedAtElapsedMillis: Long = 0L,
-    private val distanceAccumulator: DistanceAccumulator = DistanceAccumulator(),
+    private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
         process(elapsedRealtimeMillis, sample, position, signalGpsOutage = false)
@@ -212,10 +217,10 @@ class SessionCoordinator(
         } else if (enteredOutage) {
             latestReliableSample = null
             outageActive = true
-            distanceAccumulator.breakChain()
+            distanceEngine.breakChain()
         }
         val distanceDelta = if (actualReliable) {
-            distanceAccumulator.accept(requireNotNull(position), reliable = true)
+            distanceEngine.accept(requireNotNull(position), reliable = true)
         } else {
             0.0
         }
