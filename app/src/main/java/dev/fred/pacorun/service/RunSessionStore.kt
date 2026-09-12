@@ -193,6 +193,8 @@ class SessionCoordinator(
     private val publish: (RunSessionState) -> Unit,
     private val startedAtElapsedMillis: Long = 0L,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
+    private val speedEngine: SessionSpeedEngine = DopplerSpeedEngine(),
+    private val onSpeedComputed: (Double?) -> Unit = {},
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
         process(elapsedRealtimeMillis, sample, position, signalGpsOutage = false)
@@ -219,7 +221,11 @@ class SessionCoordinator(
         val timerRetainsFreshGps = sample == null && !signalGpsOutage && latestReliableSample != null
         val gpsReliable = actualReliable || timerRetainsFreshGps
         val paceSample = when {
-            actualReliable -> requireNotNull(sample)
+            actualReliable -> {
+                val engineSpeedKmh = speedEngine.accept(requireNotNull(sample), requireNotNull(position), reliable = true)
+                onSpeedComputed(engineSpeedKmh)
+                requireNotNull(sample).copy(speedKmh = engineSpeedKmh.toFloat())
+            }
             timerRetainsFreshGps -> requireNotNull(latestReliableSample)
             else -> sample ?: LocationSample(0f, null, false, elapsedRealtimeMillis)
         }
@@ -231,6 +237,7 @@ class SessionCoordinator(
             latestReliableSample = null
             outageActive = true
             distanceEngine.breakChain()
+            speedEngine.breakChain()
         }
         val distanceDelta = if (actualReliable) {
             distanceEngine.accept(requireNotNull(position), reliable = true)
