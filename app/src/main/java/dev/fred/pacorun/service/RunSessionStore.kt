@@ -172,6 +172,19 @@ interface SessionPaceEvaluator {
     fun accept(sample: LocationSample): PaceResult
 }
 
+interface SessionSpeedEngine {
+    fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double
+    fun breakChain(): Double
+}
+
+class DopplerSpeedEngine : SessionSpeedEngine {
+    override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double =
+        sample.speedKmh.toDouble()
+
+    // No chain to break for an instantaneous Doppler reading -- no-op, only here to satisfy the interface.
+    override fun breakChain(): Double = 0.0
+}
+
 class SessionCoordinator(
     private val preferences: RunPreferences,
     private val routineEngine: SessionRoutineEngine,
@@ -328,4 +341,11 @@ class RoutineEngineAdapter(private val engine: RoutineEngine) : SessionRoutineEn
 class PaceEvaluatorAdapter(private val evaluator: PaceEvaluator) : SessionPaceEvaluator {
     override fun updateConfig(config: PaceConfig) = evaluator.updateConfig(config)
     override fun accept(sample: LocationSample) = evaluator.accept(sample)
+}
+
+class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstimator()) : SessionSpeedEngine {
+    override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double =
+        speedEstimator.accept(position, reliable)
+
+    override fun breakChain(): Double = speedEstimator.breakChain()
 }
