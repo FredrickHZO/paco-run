@@ -803,3 +803,180 @@ Questa fase tocca per la prima volta il percorso di produzione vero (cue vocali 
 Riportare un riepilogo all'utente e fermarsi qui. Non procedere alla creazione del branch dedicato, al merge, o a qualunque lavoro di Fase 1/2 senza un via libera esplicito — per la stessa regola permanente che ha guidato tutta questa fase.
 
 **Esplicitamente fuori scope per questo piano (non farle):** rimozione di `DopplerSpeedEngine`; qualunque lavoro della Fase 1 (`feature/gps-precision`) o Fase 2 (inerziale); G12; il fixed-lag smoothing G8.
+
+---
+
+### Task 9 (addendum post-review, 2026-09-13): correggere il reset del motore velocità su un singolo fix inaffidabile
+
+**Contesto:** la review indipendente del Task 8 ha trovato un difetto Critical non catturato dai test del Task 4/7: `speedEngine.breakChain()` scatta su OGNI ingresso in outage, anche per un singolo fix isolato giudicato inaffidabile, non solo per interruzioni GPS genuinamente prolungate. Poiché `SpeedEstimator` riparte da 0.0 dopo un reset e impiega ~7 fix reali per riconvergere, un blip isolato produce alcuni secondi di cue vocali sbagliati (es. "troppo lento" su un runner che non ha mai cambiato ritmo). Root cause, non sintomo: il trigger di reset per `speedEngine` era stato copiato identico da `distanceEngine`, il cui costo di reset è invece trascurabile (un delta di distanza saltato è impercettibile). Analisi completa e alternative considerate/scartate: `docs/superpowers/specs/2026-09-11-precision-roadmap.md`, voce G14.
+
+**Files:**
+- Modify: `app/src/main/java/dev/fred/pacorun/service/RunSessionStore.kt`
+- Modify: `app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt`
+- Modify: `app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorRealRunTest.kt`
+
+**Vincoli non negoziabili per questo task:**
+- Non toccare `SpeedEstimator.kt` (il caso `dtSeconds<=0` per fix batchati nello stesso millisecondo, segnalato dallo stesso reviewer, resta esplicitamente fuori scope — è pre-esistente, non introdotto da questa fase).
+- Non toccare il trigger di reset di `distanceEngine` — resta `distanceEngine.breakChain()` incondizionato come oggi, è un'asimmetria intenzionale (costi di reset diversi tra i due motori), non un refuso.
+
+- [ ] **Step 1: Scrivere il test di regressione a livello coordinator che riproduce il bug con il motore vero (deve fallire prima del fix)**
+
+In `SessionCoordinatorTest.kt`, aggiungere:
+
+```kotlin
+    @Test
+    fun isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue() {
+        val preferences = RunPreferences(confirmationSamples = 1)
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = preferences,
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 9f, 1, 5_000L, false)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+            // Real KalmanSpeedEngine, not a fake -- this is exactly what Task 4's fakes missed.
+        )
+        // Metro fisso a ~0.0001 gradi di longitudine all'equatore per ogni secondo: circa
+        // 11.13 m/s... troppo veloce. Per un passo realistico a 8 km/h serve uno spostamento di
+        // (8/3.6) m/s = 2.222 m/s, cioè 2.222/111_320*cos(0) gradi di longitudine per secondo.
+        val degreesPerSecondAt8Kmh = (8.0 / 3.6) / 111_320.0
+        var longitude = 0.0
+        var time = 0L
+
+        // Alcuni fix reali a ritmo costante, per lasciare al Kalman il tempo di convergere.
+        repeat(15) {
+            longitude += degreesPerSecondAt8Kmh
+            time += 1_000L
+            coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+        }
+        cues.clear()
+
+        // Un singolo fix isolato giudicato inaffidabile -- non un'interruzione prolungata.
+        // longitude avanza comunque di un secondo pieno: il runner si è mosso davvero, solo il
+        // GPS non ce l'ha detto in modo affidabile per quell'istante (la sua posizione qui non
+        // viene comunque mai letta da nessun motore, dato che il fix è marcato inaffidabile).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, unreliableSample(time), LocationPosition(0.0, longitude, time))
+
+        // Il prossimo fix riprende esattamente lo stesso ritmo di prima -- il gap dall'ultimo
+        // fix REALMENTE usato è di 2 secondi, e riflette correttamente 2 secondi di
+        // spostamento vero a 8 km/h (non un dimezzamento fittizio della velocità media).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+
+        // Prima del fix: il motore si resetta, riparte da una velocità vicina a 0, e
+        // PaceEvaluator emette TOO_SLOW pur non essendoci stato alcun cambio di ritmo reale.
+        assertTrue(
+            "spurious pace cue after an isolated unreliable fix, no real pace change occurred: $cues",
+            AudioCue.TOO_SLOW !in cues,
+        )
+    }
+```
+
+- [ ] **Step 2: Eseguire il test, verificare che fallisca (riproduce il bug)**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest.isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue"`
+Expected: FAIL, `AudioCue.TOO_SLOW` presente nei cue.
+
+- [ ] **Step 3: Applicare la correzione in `RunSessionStore.kt` — un'unica riga**
+
+In `SessionCoordinator.process()`, sostituire:
+
+```kotlin
+        } else if (enteredOutage) {
+            latestReliableSample = null
+            outageActive = true
+            distanceEngine.breakChain()
+            speedEngine.breakChain()
+        }
+```
+
+con:
+
+```kotlin
+        } else if (enteredOutage) {
+            latestReliableSample = null
+            outageActive = true
+            distanceEngine.breakChain()
+            // Solo su un'interruzione genuinamente prolungata (stessa soglia di
+            // GpsFreshnessTracker, ~3s) -- non su un singolo fix isolato inaffidabile. Un Kalman
+            // filter gestisce da solo un gap breve (predict() sul dt, poi update() normale al
+            // fix successivo); resettarlo comunque butta via uno stato buono e costringe a
+            // ~7 fix di riconvergenza per un blip che poteva durare un solo istante. Vedi
+            // roadmap G14 per l'analisi completa e il perché NON si allenta oltre questo.
+            if (signalGpsOutage) speedEngine.breakChain()
+        }
+```
+
+- [ ] **Step 4: Eseguire il test del Task 9, verificare che passi**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest.isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue"`
+Expected: PASS.
+
+- [ ] **Step 5: Scrivere un test unitario dedicato sul trigger, con `FakeSpeedEngine`, accanto ai test del Task 4**
+
+```kotlin
+    @Test
+    fun isolatedUnreliableFixDoesNotBreakSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+
+        assertEquals(0, speedEngine.breakChainCalls)
+    }
+```
+
+(Il test già esistente `speedEngineSyncsWithDistanceEngineOnReliableFixesAndOutage`, Task 4, resta valido invariato: usa `advanceTimer(5_000L, signalGpsOutage = true)`, che continua a far scattare `breakChain()` esattamente come prima.)
+
+- [ ] **Step 6: Eseguire tutta la suite di `SessionCoordinatorTest.kt`, confermare zero regressioni**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest"`
+Expected: PASS, tutti i test (Task 4, 5, 9) verdi.
+
+- [ ] **Step 7: Aggiungere un limite superiore di plausibilità nel replay test del Task 7 (minor del reviewer, a costo quasi zero)**
+
+In `SessionCoordinatorRealRunTest.kt`, nel blocco `runningStates.forEach`, sostituire il solo controllo `isFinite()` con un controllo di plausibilità più stringente:
+
+```kotlin
+        runningStates.forEach { state ->
+            state.speedKmh?.let {
+                assertTrue("non-finite speedKmh in published state: $it", it.isFinite())
+                // Loose sanity bound (not a precision check): questa corsa reale non ha mai
+                // superato ritmi di corsa ordinari -- un valore fuori da questo range
+                // indicherebbe un bug di integrazione (es. una regressione del difetto
+                // corretto nel Task 9), non semplice rumore GPS.
+                assertTrue("implausible published speedKmh: $it", it in 0.0..20.0)
+            }
+        }
+```
+
+- [ ] **Step 8: Eseguire il replay test, verificare che passi**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorRealRunTest"`
+Expected: PASS. Se fallisce per il limite superiore troppo stretto, alzarlo sulla base del valore osservato (stesso principio di sanity-bound del Task 7 originale), non rimuoverlo.
+
+- [ ] **Step 9: Suite completa, lint, commit**
+
+```bash
+./gradlew testDebugUnitTest
+./gradlew lintDebug
+git add app/src/main/java/dev/fred/pacorun/service/RunSessionStore.kt app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorRealRunTest.kt
+git commit -m "fix: only reset speed engine on sustained GPS outage, not isolated unreliable fixes"
+```
+
+- [ ] **Step 10: Riepilogo finale e stop**
+
+Riportare un riepilogo (commit, cosa correggeva, risultato dei test) e fermarsi. Non fare merge, non toccare `docs/superpowers/specs/2026-09-11-precision-roadmap.md` (già aggiornato con la voce G14 dalla sessione di review), non procedere ad altro senza via libera esplicito.
