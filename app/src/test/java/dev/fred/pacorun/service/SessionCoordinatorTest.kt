@@ -472,6 +472,37 @@ class SessionCoordinatorTest {
         assertEquals(0, speedEngine.breakChainCalls)
     }
 
+    @Test
+    fun sustainedStreamOfUnreliableFixesEventuallyBreaksSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        // Flusso continuo di fix INAFFIDABILI (non silenzio) -- un tick al secondo. Prima dei
+        // 3 secondi (DEFAULT_MAX_AGE_MILLIS) dall'ultimo fix affidabile, nessun reset.
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+
+        // A t=3000, sono passati 3 secondi REALI dall'ultimo fix affidabile (t=0) -- deve
+        // resettarsi anche se il GPS continua a rispondere (male), non è mai stato silenzio.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        assertEquals(1, speedEngine.breakChainCalls)
+
+        // Chiamate successive nello stesso episodio possono richiamare breakChain() di nuovo --
+        // è innocuo (idempotente), non un difetto da evitare con un flag dedicato.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        assertEquals(2, speedEngine.breakChainCalls)
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,

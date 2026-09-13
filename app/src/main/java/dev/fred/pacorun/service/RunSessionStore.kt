@@ -207,6 +207,7 @@ class SessionCoordinator(
     private var latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
     private var latestReliableSample: LocationSample? = null
     private var outageActive = false
+    private var lastReliableFixElapsedMillis: Long = startedAtElapsedMillis
     private var lastRoutineTimingBucket = Long.MIN_VALUE
     private var lastRoutineTimingElapsedRealtimeMillis = Long.MIN_VALUE
 
@@ -237,13 +238,24 @@ class SessionCoordinator(
             latestReliableSample = null
             outageActive = true
             distanceEngine.breakChain()
-            // Solo su un'interruzione genuinamente prolungata (stessa soglia di
-            // GpsFreshnessTracker, ~3s) -- non su un singolo fix isolato inaffidabile. Un Kalman
-            // filter gestisce da solo un gap breve (predict() sul dt, poi update() normale al
-            // fix successivo); resettarlo comunque butta via uno stato buono e costringe a
-            // ~7 fix di riconvergenza per un blip che poteva durare un solo istante. Vedi
-            // roadmap G14 per l'analisi completa e il perché NON si allenta oltre questo.
-            if (signalGpsOutage) speedEngine.breakChain()
+        }
+        if (actualReliable) {
+            lastReliableFixElapsedMillis = elapsedRealtimeMillis
+        } else if (
+            !gpsReliable &&
+            elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
+        ) {
+            // Tempo REALE trascorso dall'ultimo fix affidabile, non "che tipo di chiamata ha
+            // innescato la transizione" (il gate del Task 9 confondeva le due cose: un flusso
+            // continuo di fix inaffidabili non passa mai da qui con signalGpsOutage=true, quindi
+            // non si resettava mai, non importa quanto durasse -- vedi review Task 9).
+            // Chiamare breakChain() più volte nello stesso episodio è innocuo (idempotente),
+            // quindi non serve un flag "già fatto per questo episodio". Stessa soglia usata
+            // altrove nel progetto per lo stesso concetto (non una soglia nuova). Vedi roadmap
+            // G14 per il perché NON si allenta oltre questo (interruzioni lunghe + spostamento
+            // reale nel frattempo restano un problema di Fase 1, deliberatamente non affrontato
+            // qui).
+            speedEngine.breakChain()
         }
         val distanceDelta = if (actualReliable) {
             distanceEngine.accept(requireNotNull(position), reliable = true)
