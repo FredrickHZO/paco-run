@@ -237,7 +237,13 @@ class SessionCoordinator(
             latestReliableSample = null
             outageActive = true
             distanceEngine.breakChain()
-            speedEngine.breakChain()
+            // Solo su un'interruzione genuinamente prolungata (stessa soglia di
+            // GpsFreshnessTracker, ~3s) -- non su un singolo fix isolato inaffidabile. Un Kalman
+            // filter gestisce da solo un gap breve (predict() sul dt, poi update() normale al
+            // fix successivo); resettarlo comunque butta via uno stato buono e costringe a
+            // ~7 fix di riconvergenza per un blip che poteva durare un solo istante. Vedi
+            // roadmap G14 per l'analisi completa e il perché NON si allenta oltre questo.
+            if (signalGpsOutage) speedEngine.breakChain()
         }
         val distanceDelta = if (actualReliable) {
             distanceEngine.accept(requireNotNull(position), reliable = true)

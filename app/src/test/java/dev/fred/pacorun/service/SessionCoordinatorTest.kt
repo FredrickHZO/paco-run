@@ -402,6 +402,76 @@ class SessionCoordinatorTest {
         assertEquals(2, routine.inputs.size)
     }
 
+    @Test
+    fun isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue() {
+        val preferences = RunPreferences(confirmationSamples = 1)
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = preferences,
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 9f, 1, 5_000L, false)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+            // Real KalmanSpeedEngine, not a fake -- this is exactly what Task 4's fakes missed.
+        )
+        // Metro fisso a ~0.0001 gradi di longitudine all'equatore per ogni secondo: circa
+        // 11.13 m/s... troppo veloce. Per un passo realistico a 8 km/h serve uno spostamento di
+        // (8/3.6) m/s = 2.222 m/s, cioè 2.222/111_320*cos(0) gradi di longitudine per secondo.
+        val degreesPerSecondAt8Kmh = (8.0 / 3.6) / 111_320.0
+        var longitude = 0.0
+        var time = 0L
+
+        // Alcuni fix reali a ritmo costante, per lasciare al Kalman il tempo di convergere.
+        repeat(15) {
+            longitude += degreesPerSecondAt8Kmh
+            time += 1_000L
+            coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+        }
+        cues.clear()
+
+        // Un singolo fix isolato giudicato inaffidabile -- non un'interruzione prolungata.
+        // longitude avanza comunque di un secondo pieno: il runner si è mosso davvero, solo il
+        // GPS non ce l'ha detto in modo affidabile per quell'istante (la sua posizione qui non
+        // viene comunque mai letta da nessun motore, dato che il fix è marcato inaffidabile).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, unreliableSample(time), LocationPosition(0.0, longitude, time))
+
+        // Il prossimo fix riprende esattamente lo stesso ritmo di prima -- il gap dall'ultimo
+        // fix REALMENTE usato è di 2 secondi, e riflette correttamente 2 secondi di
+        // spostamento vero a 8 km/h (non un dimezzamento fittizio della velocità media).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+
+        // Prima del fix: il motore si resetta, riparte da una velocità vicina a 0, e
+        // PaceEvaluator emette TOO_SLOW pur non essendoci stato alcun cambio di ritmo reale.
+        assertTrue(
+            "spurious pace cue after an isolated unreliable fix, no real pace change occurred: $cues",
+            AudioCue.TOO_SLOW !in cues,
+        )
+    }
+
+    @Test
+    fun isolatedUnreliableFixDoesNotBreakSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+
+        assertEquals(0, speedEngine.breakChainCalls)
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,

@@ -41,7 +41,14 @@ class SessionCoordinatorRealRunTest {
         val runningStates = published.filterIsInstance<RunSessionState.Running>()
         assertTrue("no Running state was ever published", runningStates.isNotEmpty())
         runningStates.forEach { state ->
-            state.speedKmh?.let { assertTrue("non-finite speedKmh in published state: $it", it.isFinite()) }
+            state.speedKmh?.let {
+                assertTrue("non-finite speedKmh in published state: $it", it.isFinite())
+                // Loose sanity bound (not a precision check): questa corsa reale non ha mai
+                // superato ritmi di corsa ordinari -- un valore fuori da questo range
+                // indicherebbe un bug di integrazione (es. una regressione del difetto
+                // corretto nel Task 9), non semplice rumore GPS.
+                assertTrue("implausible published speedKmh: $it", it in 0.0..20.0)
+            }
         }
         val finalDistance = runningStates.last().totalDistanceMeters
         // Loose sanity bound (not a precision check -- that's SpeedEstimatorRealRunTest.kt and
