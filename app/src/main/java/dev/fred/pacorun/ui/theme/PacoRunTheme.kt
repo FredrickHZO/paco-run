@@ -1,5 +1,6 @@
 package dev.fred.pacorun.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
@@ -16,9 +17,12 @@ fun PacoRunTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    // Dynamic color (Material You) reads the wallpaper-derived system palette, introduced in
+    // Android 12 (API 31) -- doesn't exist on older versions, falls back to the fixed palette.
+    val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val colors = when {
-        dynamicColor && darkTheme -> dynamicDarkColorScheme(LocalContext.current)
-        dynamicColor -> dynamicLightColorScheme(LocalContext.current)
+        dynamicColor && supportsDynamicColor && darkTheme -> dynamicDarkColorScheme(LocalContext.current)
+        dynamicColor && supportsDynamicColor -> dynamicLightColorScheme(LocalContext.current)
         else -> fixedColorScheme(fixedPalette, darkTheme)
     }
     MaterialExpressiveTheme(
