@@ -980,3 +980,139 @@ git commit -m "fix: only reset speed engine on sustained GPS outage, not isolate
 - [ ] **Step 10: Riepilogo finale e stop**
 
 Riportare un riepilogo (commit, cosa correggeva, risultato dei test) e fermarsi. Non fare merge, non toccare `docs/superpowers/specs/2026-09-11-precision-roadmap.md` (già aggiornato con la voce G14 dalla sessione di review), non procedere ad altro senza via libera esplicito.
+
+---
+
+### Task 10 (addendum post-review del Task 9, 2026-09-13): sostituire il gate `signalGpsOutage` con un controllo sul tempo reale trascorso
+
+**Contesto:** la review indipendente del Task 9 ha trovato un Important reale: `if (signalGpsOutage) speedEngine.breakChain()` non fa quello che il suo commento dichiara. `signalGpsOutage` dentro `enteredOutage` è vero solo se questa specifica chiamata è un tick del timer (`sample == null`) — non riflette "sono passati ~3 secondi". Un'interruzione GPS genuinamente lunga che si manifesta come un **flusso continuo di fix inaffidabili** (non silenzio) blocca `outageActive=true` al primo fix cattivo, e nessuna chiamata successiva rivaluta più nulla per quell'episodio — il motore velocità non si resetta mai, non importa quanto duri. Root cause: la decisione veniva presa una volta sola, nell'istante di ingresso in outage, quando non si sa ancora se l'interruzione sarà breve o lunga.
+
+**La correzione (sostituisce per intero il gate del Task 9, non lo estende):** invece di dedurre la durata da QUALE tipo di chiamata ha innescato la transizione, `SessionCoordinator` tiene traccia direttamente di quando è avvenuto l'ultimo fix davvero affidabile, e verifica il tempo reale trascorso ad ogni chiamata (non solo al momento della transizione). Riusa la stessa costante già usata altrove nel progetto per lo stesso concetto (`LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS`, ~3s) — nessuna soglia nuova o arbitraria. Chiamare `speedEngine.breakChain()` più volte durante lo stesso episodio di interruzione è innocuo (l'operazione è idempotente — vedi `SpeedEstimator.breakChain()`), quindi non serve nessun flag "già resettato per questo episodio": lo stato aggiuntivo necessario è un solo campo.
+
+**Files:**
+- Modify: `app/src/main/java/dev/fred/pacorun/service/RunSessionStore.kt`
+- Modify: `app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt`
+
+**Vincoli non negoziabili per questo task:**
+- Non toccare `SpeedEstimator.kt`, `distanceEngine`, o il meccanismo di `GpsFreshnessTracker`/`signalGpsOutage` usato altrove (routine, pace, notifica di stato) — questa correzione riguarda SOLO la decisione interna di reset di `speedEngine` dentro `SessionCoordinator`.
+- Non aggiungere un flag "già resettato" — è stato deliberatamente scartato (vedi sopra), non reintrodurlo per "sicurezza".
+
+- [ ] **Step 1: Scrivere il test che riproduce lo scenario trovato dal reviewer (flusso continuo di fix inaffidabili, non silenzio) — deve fallire con l'implementazione del Task 9**
+
+In `SessionCoordinatorTest.kt`, accanto al test `isolatedUnreliableFixDoesNotBreakSpeedEngineChain` del Task 9:
+
+```kotlin
+    @Test
+    fun sustainedStreamOfUnreliableFixesEventuallyBreaksSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        // Flusso continuo di fix INAFFIDABILI (non silenzio) -- un tick al secondo. Prima dei
+        // 3 secondi (DEFAULT_MAX_AGE_MILLIS) dall'ultimo fix affidabile, nessun reset.
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+
+        // A t=3000, sono passati 3 secondi REALI dall'ultimo fix affidabile (t=0) -- deve
+        // resettarsi anche se il GPS continua a rispondere (male), non è mai stato silenzio.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        assertEquals(1, speedEngine.breakChainCalls)
+
+        // Chiamate successive nello stesso episodio possono richiamare breakChain() di nuovo --
+        // è innocuo (idempotente), non un difetto da evitare con un flag dedicato.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        assertEquals(2, speedEngine.breakChainCalls)
+    }
+```
+
+- [ ] **Step 2: Eseguire il test, verificare che fallisca**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest.sustainedStreamOfUnreliableFixesEventuallyBreaksSpeedEngineChain"`
+Expected: FAIL a `assertEquals(1, speedEngine.breakChainCalls)` (rimane 0 con l'implementazione del Task 9, perché `signalGpsOutage` è sempre `false` per questi `tick()`).
+
+- [ ] **Step 3: Sostituire il gate del Task 9 in `RunSessionStore.kt`**
+
+Aggiungere il nuovo campo accanto agli altri campi privati di `SessionCoordinator` (vicino a `latestReliableSample`, `outageActive`):
+
+```kotlin
+    private var lastReliableFixElapsedMillis: Long = startedAtElapsedMillis
+```
+
+Sostituire il blocco introdotto dal Task 9:
+
+```kotlin
+        } else if (enteredOutage) {
+            latestReliableSample = null
+            outageActive = true
+            distanceEngine.breakChain()
+            // Solo su un'interruzione genuinamente prolungata (stessa soglia di
+            // GpsFreshnessTracker, ~3s) -- non su un singolo fix isolato inaffidabile. Un Kalman
+            // filter gestisce da solo un gap breve (predict() sul dt, poi update() normale al
+            // fix successivo); resettarlo comunque butta via uno stato buono e costringe a
+            // ~7 fix di riconvergenza per un blip che poteva durare un solo istante. Vedi
+            // roadmap G14 per l'analisi completa e il perché NON si allenta oltre questo.
+            if (signalGpsOutage) speedEngine.breakChain()
+        }
+```
+
+con:
+
+```kotlin
+        } else if (enteredOutage) {
+            latestReliableSample = null
+            outageActive = true
+            distanceEngine.breakChain()
+        }
+        if (actualReliable) {
+            lastReliableFixElapsedMillis = elapsedRealtimeMillis
+        } else if (
+            !gpsReliable &&
+            elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
+        ) {
+            // Tempo REALE trascorso dall'ultimo fix affidabile, non "che tipo di chiamata ha
+            // innescato la transizione" (il gate del Task 9 confondeva le due cose: un flusso
+            // continuo di fix inaffidabili non passa mai da qui con signalGpsOutage=true, quindi
+            // non si resettava mai, non importa quanto durasse -- vedi review Task 9).
+            // Chiamare breakChain() più volte nello stesso episodio è innocuo (idempotente),
+            // quindi non serve un flag "già fatto per questo episodio". Stessa soglia usata
+            // altrove nel progetto per lo stesso concetto (non una soglia nuova). Vedi roadmap
+            // G14 per il perché NON si allenta oltre questo (interruzioni lunghe + spostamento
+            // reale nel frattempo restano un problema di Fase 1, deliberatamente non affrontato
+            // qui).
+            speedEngine.breakChain()
+        }
+```
+
+(Nota: la scrittura di `lastReliableFixElapsedMillis` è stata spostata fuori dal blocco `if (actualReliable) { latestReliableSample = paceSample; outageActive = false; ... }` in un `if` separato subito dopo, per chiarezza — il resto di quel blocco resta invariato.)
+
+- [ ] **Step 4: Eseguire il test del Task 10, verificare che passi**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest.sustainedStreamOfUnreliableFixesEventuallyBreaksSpeedEngineChain"`
+Expected: PASS.
+
+- [ ] **Step 5: Eseguire tutta la suite di `SessionCoordinatorTest.kt`, confermare che i test del Task 4 e del Task 9 restino verdi SENZA modifiche**
+
+Run: `./gradlew testDebugUnitTest --tests "dev.fred.pacorun.service.SessionCoordinatorTest"`
+Expected: PASS. In particolare: `isolatedUnreliableFixDoesNotBreakSpeedEngineChain` (Task 9) resta verde perché 1 secondo di gap resta sotto soglia; `speedEngineSyncsWithDistanceEngineOnReliableFixesAndOutage` (Task 4) resta verde perché il suo `advanceTimer(5_000L, ...)` corrisponde comunque a 4 secondi reali trascorsi dall'ultimo fix affidabile (sopra soglia), indipendentemente da `signalGpsOutage`; `isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue` (Task 9, motore reale) resta verde per lo stesso motivo del primo. Se uno di questi tre risultasse rotto, il Task 10 ha introdotto una regressione reale — fermarsi e correggere, non modificare le loro asserzioni.
+
+- [ ] **Step 6: Suite completa, lint, commit**
+
+```bash
+./gradlew testDebugUnitTest
+./gradlew lintDebug
+git add app/src/main/java/dev/fred/pacorun/service/RunSessionStore.kt app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt
+git commit -m "fix: track real elapsed time since last reliable fix for speed engine reset, not call type"
+```
+
+- [ ] **Step 7: Riepilogo finale e stop**
+
+Riportare un riepilogo (commit, cosa correggeva rispetto al Task 9, risultato dei test) e fermarsi. Non fare merge, non toccare la roadmap, non procedere ad altro senza via libera esplicito.
