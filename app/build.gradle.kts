@@ -8,7 +8,7 @@ android {
     compileSdk = 37
     defaultConfig {
         applicationId = "dev.fred.pacorun"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 37
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
