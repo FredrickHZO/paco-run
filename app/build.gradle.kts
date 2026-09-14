@@ -3,6 +3,16 @@ plugins {
   alias(libs.plugins.compose.compiler)
 }
 
+fun gitCommitHash(): String = try {
+    val process = ProcessBuilder("git", "rev-parse", "--short=12", "HEAD")
+        .redirectErrorStream(true)
+        .start()
+    process.waitFor()
+    process.inputStream.bufferedReader().readText().trim().ifEmpty { "unknown" }
+} catch (e: Exception) {
+    "unknown"
+}
+
 android {
     namespace = "dev.fred.pacorun"
     compileSdk = 37
@@ -13,6 +23,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "GIT_COMMIT_HASH", "\"${gitCommitHash()}\"")
     }
 
     buildTypes {
@@ -28,7 +39,7 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
     }
 
