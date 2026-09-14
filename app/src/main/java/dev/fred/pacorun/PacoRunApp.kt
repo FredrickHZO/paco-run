@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -59,16 +60,17 @@ fun PacoRunApp() {
     val scope = rememberCoroutineScope()
     var readinessRefresh by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, session) {
+    val currentSession by rememberUpdatedState(session)
+    DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> readinessRefresh++
-                Lifecycle.Event.ON_START -> if (session is RunSessionState.Running) {
+                Lifecycle.Event.ON_START -> if (currentSession is RunSessionState.Running) {
                     context.startService(
                         Intent(context, RunSessionService::class.java).setAction(RunSessionService.ACTION_APP_FOREGROUNDED),
                     )
                 }
-                Lifecycle.Event.ON_STOP -> if (session is RunSessionState.Running) {
+                Lifecycle.Event.ON_STOP -> if (currentSession is RunSessionState.Running) {
                     context.startService(
                         Intent(context, RunSessionService::class.java).setAction(RunSessionService.ACTION_APP_BACKGROUNDED),
                     )
