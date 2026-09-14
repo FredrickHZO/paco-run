@@ -72,6 +72,8 @@ Every file path, line reference, and current-code snippet quoted in this plan wa
 
 Pure data declarations, no behavior — same category as `RoutineModels.kt`/`PaceModels.kt`, neither of which has a dedicated test file in this project. No TDD cycle for this task; correctness is verified by Task 2's serializer tests exercising every field kind, and by the full suite compiling.
 
+**Plan-level refinement beyond the spec:** `PaceCandidateAbandonReason` carries a third value, `SUPERSEDED_BY_NEW_CANDIDATE`, that `docs/superpowers/specs/2026-09-14-session-event-logging-design.md` (5.4) does not enumerate — the spec names only `SNAPPED_BACK_TO_CONFIRMED`/`GPS_BECAME_UNRELIABLE`. It was added during review of this plan to instrument a third, previously-unacknowledged candidate-abandon path in `PaceEvaluator.accept()` (direct candidate-to-candidate supersession, without ever passing through a confirmed state) — see Task 5's Decision note and Task 17's final report for the rationale. Flagged here explicitly so this isn't a silent divergence from the spec.
+
 - [ ] **Step 1: Write the file**
 
 ```kotlin
@@ -187,7 +189,7 @@ data class PaceCandidateAbandonedEvent(
     val reason: PaceCandidateAbandonReason,
 ) : SessionEvent
 
-enum class PaceCandidateAbandonReason { SNAPPED_BACK_TO_CONFIRMED, GPS_BECAME_UNRELIABLE }
+enum class PaceCandidateAbandonReason { SNAPPED_BACK_TO_CONFIRMED, GPS_BECAME_UNRELIABLE, SUPERSEDED_BY_NEW_CANDIDATE }
 
 // --- 5.5: chain-break events ---
 
@@ -1059,7 +1061,7 @@ git commit -m "feat: wire SpeedEstimator's three internal breakChain() sites to 
 Per spec 5.4:
 - `PaceStateConfirmedEvent` fires every time `confirmedPace` actually changes (the `confirmedPace = pace` assignment), regardless of whether an audible cue results — `producedAudibleCue` is exactly `paceCue != null` computed right there.
 - `PaceCandidateStartedEvent` fires whenever a genuinely new candidate begins accumulating (the `else` branch that sets `candidatePace = pace; candidateSamples = 1`).
-- `PaceCandidateAbandonedEvent` fires **only** at the two `clearCandidate()` call sites the spec names — the "snapped back to confirmed" branch and `acceptUnreliable()` — each guarded by "only if a candidate was actually in progress" (spec's own guard). The other two `clearCandidate()` call sites (`updateConfig()`'s phase-change reset, and the post-confirmation bookkeeping reset) are **deliberately excluded**, exactly as the spec states.
+- `PaceCandidateAbandonedEvent` fires at **three** `accept()` sites, not the two the spec names — a deliberate plan-level addition, decided during review of this plan (see the Task 1 note above `PaceCandidateAbandonReason`'s declaration). The two the spec names — the "snapped back to confirmed" branch and `acceptUnreliable()` — each guarded by "only if a candidate was actually in progress" (spec's own guard), reason `SNAPPED_BACK_TO_CONFIRMED`/`GPS_BECAME_UNRELIABLE`. The third: the `else` branch of the `if (pace == candidatePace) { ... } else { ... }` split inside `accept()` — reached when a new sample's state matches **neither** the confirmed state nor the in-progress candidate, i.e. a candidate is replaced by a *different* candidate without ever confirming or snapping back. Left uninstrumented, this path silently drops the in-progress candidate (`candidatePace = pace; candidateSamples = 1`, no `clearCandidate()`, no event) — exactly the rapid non-converging pace-state churn P1 exists to make visible, and directly relevant to the P2 flapping investigation. Instrumented here with a new reason, `SUPERSEDED_BY_NEW_CANDIDATE`, fired for the **old** candidate (its state and accumulated sample count) immediately before the new candidate starts. Guarded the same way as the other two: only if a candidate was actually in progress (i.e. `candidatePace != null` before the reassignment) — the very first candidate of a session, or the first candidate after a confirm/snap-back/GPS-unreliable reset, has nothing to supersede and emits no abandon event, only `PaceCandidateStartedEvent`. The other two `clearCandidate()` call sites (`updateConfig()`'s phase-change reset, and the post-confirmation bookkeeping reset) remain **deliberately excluded**, exactly as the spec states — unaffected by this addition.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1075,7 +1077,7 @@ Per spec 5.4:
         assertEquals(
             listOf(
                 dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_FAST),
-                dev.fred.pacorun.eventlog.PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, false),
+                dev.fred.pacorun.eventlog.PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, true),
             ),
             events,
         )
@@ -1113,20 +1115,48 @@ Per spec 5.4:
         val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
         val evaluator = PaceEvaluator(config, onEvent = events::add)
 
-        evaluator.accept(sample(8f, 0L)) // confirms GOOD immediately (first sample already == GOOD, no candidate needed)
+        // config has confirmationSamples = 2 (see the shared `config` fixture above) -- reaching
+        // CONFIRMED needs two consecutive same-range samples, same as every other test in this file.
+        evaluator.accept(sample(8f, 0L)) // candidate GOOD starts accumulating
+        evaluator.accept(sample(8f, 1_000L)) // confirms GOOD
         events.clear()
-        evaluator.accept(sample(8.7f, 1_000L)) // candidate TOO_FAST starts accumulating
-        evaluator.accept(sample(8f, 2_000L)) // snaps back to confirmed GOOD before TOO_FAST confirms
+        evaluator.accept(sample(8.7f, 2_000L)) // candidate TOO_FAST starts accumulating
+        evaluator.accept(sample(8f, 3_000L)) // snaps back to already-confirmed GOOD before TOO_FAST confirms
 
         assertEquals(
             listOf(
-                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(1_000L, PaceState.TOO_FAST),
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(2_000L, PaceState.TOO_FAST),
                 dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent(
-                    2_000L,
+                    3_000L,
                     PaceState.TOO_FAST,
                     1,
                     dev.fred.pacorun.eventlog.PaceCandidateAbandonReason.SNAPPED_BACK_TO_CONFIRMED,
                 ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun candidateDirectlySupersededByADifferentCandidateEmitsAbandonedWithSupersededReason() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        // No confirmation, no snap-back, no unreliable sample in between -- the in-progress
+        // TOO_SLOW candidate is replaced directly by a TOO_FAST one before ever confirming.
+        evaluator.accept(sample(7.3f, 0L)) // candidate TOO_SLOW starts accumulating
+        evaluator.accept(sample(8.7f, 1_000L)) // TOO_FAST supersedes the TOO_SLOW candidate directly
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_SLOW),
+                dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent(
+                    1_000L,
+                    PaceState.TOO_SLOW,
+                    1,
+                    dev.fred.pacorun.eventlog.PaceCandidateAbandonReason.SUPERSEDED_BY_NEW_CANDIDATE,
+                ),
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(1_000L, PaceState.TOO_FAST),
             ),
             events,
         )
@@ -1230,6 +1260,17 @@ class PaceEvaluator(private var config: PaceConfig, private val onEvent: (Sessio
         if (pace == candidatePace) {
             candidateSamples++
         } else {
+            val supersededCandidate = candidatePace
+            if (supersededCandidate != null) {
+                onEvent(
+                    PaceCandidateAbandonedEvent(
+                        sample.elapsedRealtimeMillis,
+                        supersededCandidate,
+                        candidateSamples,
+                        PaceCandidateAbandonReason.SUPERSEDED_BY_NEW_CANDIDATE,
+                    ),
+                )
+            }
             candidatePace = pace
             candidateSamples = 1
             onEvent(PaceCandidateStartedEvent(sample.elapsedRealtimeMillis, pace))
@@ -1540,7 +1581,7 @@ git commit -m "feat: wire RoutineEngine to emit RoutinePhaseChangedEvent at ever
 Three emission points inside `SessionCoordinator.process()`:
 1. **`AudioCueEmittedEvent`** — one per cue, at the same point `onCues(cues, preferences.cueVolume)` is already called, using `routine.totalDistanceMeters` and `paceSample.speedKmh.takeIf { gpsReliable }`, both already local at that point (spec Decision 6).
 2. **`DistanceChainBrokenEvent(GPS_OUTAGE_ENTERED)`** — at the `enteredOutage` branch, immediately before calling `distanceEngine.breakChain()`.
-3. **`SpeedChainBrokenEvent(STALE_NO_RECENT_RELIABLE_FIX)`** — at the elapsed-time gate (the Task 10 fix from `2026-09-13-speed-production-wiring.md`), immediately before calling `speedEngine.breakChain()`.
+3. **`SpeedChainBrokenEvent(STALE_NO_RECENT_RELIABLE_FIX)`** — at the elapsed-time gate (the Task 10 fix from `2026-09-13-speed-production-wiring.md`), immediately before calling `speedEngine.breakChain()`, **guarded to fire once per outage episode**. `speedEngine.breakChain()` itself is called on every tick for the entire duration of a sustained outage — deliberately idempotent by production design (see that gate's own comment: "Chiamare breakChain() più volte nello stesso episodio è innocuo"), and this task does not touch that. But wiring `onEvent(...)` at the same call site unguarded would emit one `SpeedChainBrokenEvent` per tick (once per second) for the entire outage, which is not what this log is for. Verified against `SessionCoordinator.process()` on `feature/speed-production-wiring`: the staleness gate (`elapsedRealtimeMillis - lastReliableFixElapsedMillis >= DEFAULT_MAX_AGE_MILLIS`) is a **separate** condition from `enteredOutage`/`outageActive` (`DistanceChainBrokenEvent(GPS_OUTAGE_ENTERED)`'s own guard) — it opens on a later tick than `outageActive` first flips true (`DEFAULT_MAX_AGE_MILLIS` is 3000ms, `outageActive` flips on the very first unreliable tick), so reusing `outageActive`'s transition to gate this event does not line up with when the gate itself first opens. Instead, a dedicated boolean — `speedChainBrokenReportedForOutage`, same "already reported for this episode" pattern `GpsSilentGapTracker` (Task 10) uses for its own `reportedForCurrentGap` flag — is set `true` the first time the event fires and reset `false` on the next `actualReliable` tick (the same point that already resets `lastReliableFixElapsedMillis`), so the event fires exactly once per outage episode while `speedEngine.breakChain()` keeps firing every tick as before.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1599,7 +1640,44 @@ Three emission points inside `SessionCoordinator.process()`:
     }
 
     @Test
-    fun sustainedUnreliableStreamEmitsSpeedChainBrokenEventWithStaleReason() {
+    fun sustainedUnreliableStreamEmitsSpeedChainBrokenEventOnlyOnceAcrossTheWholeOutage() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        // DEFAULT_MAX_AGE_MILLIS is 3000ms -- the staleness gate first opens on this tick.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        // The gate stays open on every subsequent unreliable tick (elapsed keeps growing past the
+        // threshold) -- speedEngine.breakChain() is called again each time (idempotent, unchanged
+        // production behavior), but the event itself must not repeat.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    3_000L,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX,
+                ),
+            ),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>(),
+        )
+        assertEquals(3, speedEngine.breakChainCalls) // breakChain() itself still fires every stale tick (3000/4000/5000), unguarded
+    }
+
+    @Test
+    fun aFreshReliableFixAfterAnOutageAllowsTheEventToFireAgainOnTheNextOutage() {
         val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
         val coordinator = SessionCoordinator(
             preferences = RunPreferences(),
@@ -1614,16 +1692,15 @@ Three emission points inside `SessionCoordinator.process()`:
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
         coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
         coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
-        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L)) // fires once
+        coordinator.tick(4_000L, reliableSample(8f, 4_000L), LocationPosition(0.0, .0004, 4_000L)) // outage ends
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+        coordinator.tick(6_000L, unreliableSample(6_000L), LocationPosition(0.0, .0006, 6_000L))
+        coordinator.tick(7_000L, unreliableSample(7_000L), LocationPosition(0.0, .0007, 7_000L)) // fires again, new episode
 
         assertEquals(
-            listOf(
-                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
-                    3_000L,
-                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX,
-                ),
-            ),
-            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>(),
+            listOf(3_000L, 7_000L),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>().map { it.elapsedRealtimeMillis },
         )
     }
 ```
@@ -1663,6 +1740,12 @@ class SessionCoordinator(
 ) {
 ```
 
+Add a new field next to the existing `outageActive`/`lastReliableFixElapsedMillis` fields — "already reported for the current stale-speed episode", same pattern `GpsSilentGapTracker` (Task 10) uses for `reportedForCurrentGap`:
+
+```kotlin
+    private var speedChainBrokenReportedForOutage = false
+```
+
 Inside `process()`, change the outage-entry block:
 
 ```kotlin
@@ -1674,11 +1757,20 @@ Inside `process()`, change the outage-entry block:
         }
         if (actualReliable) {
             lastReliableFixElapsedMillis = elapsedRealtimeMillis
+            speedChainBrokenReportedForOutage = false
         } else if (
             !gpsReliable &&
             elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
         ) {
-            onEvent(SpeedChainBrokenEvent(elapsedRealtimeMillis, SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX))
+            // speedEngine.breakChain() stays unconditional -- calling it repeatedly for the same
+            // outage is deliberately idempotent (see this gate's own comment above, unchanged by
+            // this task). The event is different: without a guard, onEvent(...) here would fire
+            // once per tick for the entire outage. speedChainBrokenReportedForOutage makes it fire
+            // once per episode, reset the moment a fresh reliable fix arrives above.
+            if (!speedChainBrokenReportedForOutage) {
+                onEvent(SpeedChainBrokenEvent(elapsedRealtimeMillis, SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX))
+                speedChainBrokenReportedForOutage = true
+            }
             speedEngine.breakChain()
         }
 ```
@@ -3110,7 +3202,7 @@ Re-read the full diff (`git diff feature/speed-production-wiring...HEAD` from wi
 Ask the subagent to confirm specifically:
 - (a) `SessionEventWriter.toJsonLine()`'s `when` is exhaustive over `SessionEvent` (the compiler already enforces this, but confirm no `else ->` branch was added that would silently swallow a future 13th type).
 - (b) Every `Double`/`Float` field in every one of the 12 event types passes through `jsonNumber()` somewhere in `SessionEventWriter.kt`, not a raw `.toString()`.
-- (c) `PaceEvaluator`'s `PaceCandidateAbandonedEvent` fires from exactly the two call sites the spec names (the "snap back to confirmed" branch and `acceptUnreliable()`) and nowhere else — specifically, confirm `updateConfig()`'s `clearCandidate()` and the post-confirmation `clearCandidate()` (inside the successful-confirmation branch) do **not** go through `abandonCandidateIfAny()`.
+- (c) `PaceEvaluator`'s `PaceCandidateAbandonedEvent` fires from exactly the three sites this plan wires (the "snap back to confirmed" branch and `acceptUnreliable()`, both via `abandonCandidateIfAny()`, plus the direct-supersession `else` branch inside `accept()`'s candidate split, guarded on `candidatePace != null`) and nowhere else — specifically, confirm `updateConfig()`'s `clearCandidate()` and the post-confirmation `clearCandidate()` (inside the successful-confirmation branch) do **not** go through `abandonCandidateIfAny()` or emit an event some other way.
 - (d) `SessionCoordinator`'s `AudioCueEmittedEvent` emission happens for every cue in the same list passed to `onCues(...)`, not a re-derived list.
 - (e) `RunSessionService`'s `SessionEventLogger` is `start()`-ed before any other event in `beginTracking()` could fire, and `stop()`-ed in `stopSession()` even on the early-return paths (permission denial, `SecurityException`) — trace both early `stopSession()` calls inside `beginTracking()` to confirm they reach the `eventLogger?.stop()` line.
 
@@ -3121,5 +3213,6 @@ Report: task count, one-line summary per task, the commit hash of the final comm
 2. `GpsSilentGapEvent`'s 5000ms threshold (Task 10) — fine as a first estimate, or adjust?
 3. `DeviceHealthSampledEvent`'s 30-second cadence (Task 15) — fine, or move closer to 60s to cut volume on long runs?
 4. This plan assumed P1 forks from `feature/speed-production-wiring` (per this plan's Branch section) — confirm before merging either branch.
+5. **Plan-level schema addition, not from the spec:** `PaceCandidateAbandonReason.SUPERSEDED_BY_NEW_CANDIDATE` (Task 1/5) — the spec's 5.4 names only two reasons; this plan adds a third to instrument a previously-unacknowledged direct candidate-to-candidate supersession path in `PaceEvaluator.accept()`, decided during review, not an open question but flagged here so the divergence from `2026-09-14-session-event-logging-design.md` is explicit and on the record.
 
 **Do not merge, delete the branch, build an APK, or start P2/P3/P4 work.** Stop here for an explicit go-ahead, per this project's standing rule.
