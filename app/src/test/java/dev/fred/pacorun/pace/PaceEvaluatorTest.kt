@@ -192,6 +192,136 @@ class PaceEvaluatorTest {
         assertNull(evaluator.accept(sample(8.5f, 2_000L)).cue)
     }
 
+    @Test
+    fun confirmingAPaceChangeEmitsPaceStateConfirmedEventWithFromAndToState() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        evaluator.accept(sample(8.7f, 0L))
+        evaluator.accept(sample(8.8f, 1_000L)) // confirms TOO_FAST, fromState null (first confirmation)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_FAST),
+                dev.fred.pacorun.eventlog.PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, true),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun goodPaceAfterConfirmedTooFastProducesAnAudibleCueMarkedTrue() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        evaluator.accept(sample(8.7f, 0L))
+        evaluator.accept(sample(8.8f, 1_000L)) // confirms TOO_FAST
+        events.clear()
+        evaluator.accept(sample(8f, 2_000L))
+        evaluator.accept(sample(8f, 3_000L)) // confirms GOOD, previous == TOO_FAST -> audible
+
+        val confirmed = events.filterIsInstance<dev.fred.pacorun.eventlog.PaceStateConfirmedEvent>().single()
+        assertEquals(PaceState.TOO_FAST, confirmed.fromState)
+        assertEquals(PaceState.GOOD, confirmed.toState)
+        assertEquals(true, confirmed.producedAudibleCue)
+    }
+
+    @Test
+    fun newCandidateDifferentFromConfirmedEmitsPaceCandidateStartedEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        evaluator.accept(sample(7.3f, 0L))
+
+        assertEquals(listOf(dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_SLOW)), events)
+    }
+
+    @Test
+    fun sampleSnappingBackToConfirmedAbandonsInProgressCandidate() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        // config has confirmationSamples = 2 (see the shared `config` fixture above) -- reaching
+        // CONFIRMED needs two consecutive same-range samples, same as every other test in this file.
+        evaluator.accept(sample(8f, 0L)) // candidate GOOD starts accumulating
+        evaluator.accept(sample(8f, 1_000L)) // confirms GOOD
+        events.clear()
+        evaluator.accept(sample(8.7f, 2_000L)) // candidate TOO_FAST starts accumulating
+        evaluator.accept(sample(8f, 3_000L)) // snaps back to already-confirmed GOOD before TOO_FAST confirms
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(2_000L, PaceState.TOO_FAST),
+                dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent(
+                    3_000L,
+                    PaceState.TOO_FAST,
+                    1,
+                    dev.fred.pacorun.eventlog.PaceCandidateAbandonReason.SNAPPED_BACK_TO_CONFIRMED,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun candidateDirectlySupersededByADifferentCandidateEmitsAbandonedWithSupersededReason() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        // No confirmation, no snap-back, no unreliable sample in between -- the in-progress
+        // TOO_SLOW candidate is replaced directly by a TOO_FAST one before ever confirming.
+        evaluator.accept(sample(7.3f, 0L)) // candidate TOO_SLOW starts accumulating
+        evaluator.accept(sample(8.7f, 1_000L)) // TOO_FAST supersedes the TOO_SLOW candidate directly
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_SLOW),
+                dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent(
+                    1_000L,
+                    PaceState.TOO_SLOW,
+                    1,
+                    dev.fred.pacorun.eventlog.PaceCandidateAbandonReason.SUPERSEDED_BY_NEW_CANDIDATE,
+                ),
+                dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(1_000L, PaceState.TOO_FAST),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun gpsBecomingUnreliableAbandonsInProgressCandidate() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        evaluator.accept(sample(8.7f, 0L)) // candidate TOO_FAST starts accumulating
+        events.clear()
+        evaluator.accept(unreliable(1_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent(
+                    1_000L,
+                    PaceState.TOO_FAST,
+                    1,
+                    dev.fred.pacorun.eventlog.PaceCandidateAbandonReason.GPS_BECAME_UNRELIABLE,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun phaseChangeResetDoesNotEmitAnAbandonEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        evaluator.accept(sample(8.7f, 0L)) // candidate TOO_FAST starts accumulating
+        events.clear()
+        evaluator.updateConfig(config) // phase-change reset -- already covered by RoutinePhaseChangedEvent, not an abandon
+
+        assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
+    }
+
     private fun evaluatorAlreadyFast() = PaceEvaluator(config).also {
         it.accept(sample(8.7f, 0L))
         it.accept(sample(8.8f, 1_000L))
