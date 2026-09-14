@@ -34,6 +34,8 @@ import dev.fred.pacorun.BuildConfig
 import dev.fred.pacorun.R
 import dev.fred.pacorun.audio.CuePlayer
 import dev.fred.pacorun.eventlog.AppLifecycleChangedEvent
+import dev.fred.pacorun.eventlog.DeviceHealthSampledEvent
+import dev.fred.pacorun.eventlog.GpsSilentGapEvent
 import dev.fred.pacorun.eventlog.LifecycleTransition
 import dev.fred.pacorun.eventlog.LocationFixEvent
 import dev.fred.pacorun.eventlog.NetworkType
@@ -41,6 +43,7 @@ import dev.fred.pacorun.eventlog.SensorAvailability
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SessionStarted
 import dev.fred.pacorun.eventlog.SpeedEstimatorDiagnostics
+import dev.fred.pacorun.eventlog.ThermalStatus
 import dev.fred.pacorun.export.GpxExporter
 import dev.fred.pacorun.export.GpxWriter
 import dev.fred.pacorun.export.TrackPoint
@@ -351,7 +354,44 @@ class RunSessionService : Service() {
         if (second == lastTimerSecond) return
         lastTimerSecond = second
         val gpsOutage = gpsFreshness.isOutage(elapsedRealtimeMillis)
+        gpsSilentGap.checkGap(elapsedRealtimeMillis)?.let { gap ->
+            onEvent(GpsSilentGapEvent(elapsedRealtimeMillis, gap))
+        }
+        sampleDeviceHealthIfDue(elapsedRealtimeMillis)
         coordinator?.advanceTimer(elapsedRealtimeMillis, signalGpsOutage = gpsOutage)
+    }
+
+    private fun sampleDeviceHealthIfDue(elapsedRealtimeMillis: Long) {
+        val bucket = elapsedRealtimeMillis / DEVICE_HEALTH_BUCKET_MILLIS
+        if (bucket == lastDeviceHealthBucket) return
+        lastDeviceHealthBucket = bucket
+        onEvent(
+            DeviceHealthSampledEvent(
+                elapsedRealtimeMillis = elapsedRealtimeMillis,
+                batteryPercent = currentBatteryPercent(),
+                thermalStatus = currentThermalStatus(),
+            ),
+        )
+    }
+
+    private fun currentBatteryPercent(): Int? {
+        val batteryManager = getSystemService(BatteryManager::class.java) ?: return null
+        val percent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return percent.takeIf { it in 0..100 }
+    }
+
+    private fun currentThermalStatus(): ThermalStatus {
+        val powerManager = getSystemService(PowerManager::class.java) ?: return ThermalStatus.UNKNOWN
+        return when (powerManager.currentThermalStatus) {
+            PowerManager.THERMAL_STATUS_NONE -> ThermalStatus.NONE
+            PowerManager.THERMAL_STATUS_LIGHT -> ThermalStatus.LIGHT
+            PowerManager.THERMAL_STATUS_MODERATE -> ThermalStatus.MODERATE
+            PowerManager.THERMAL_STATUS_SEVERE -> ThermalStatus.SEVERE
+            PowerManager.THERMAL_STATUS_CRITICAL -> ThermalStatus.CRITICAL
+            PowerManager.THERMAL_STATUS_EMERGENCY -> ThermalStatus.EMERGENCY
+            PowerManager.THERMAL_STATUS_SHUTDOWN -> ThermalStatus.SHUTDOWN
+            else -> ThermalStatus.UNKNOWN
+        }
     }
 
     private fun publish(state: RunSessionState) {
@@ -444,5 +484,6 @@ class RunSessionService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val TICK_MILLIS = 1_000L
         private const val KEY_SESSION_OPEN = "session_open"
+        private const val DEVICE_HEALTH_BUCKET_MILLIS = 30_000L
     }
 }
