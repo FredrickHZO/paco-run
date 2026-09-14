@@ -72,6 +72,30 @@ class GpsFreshnessTracker(
     } ?: true
 }
 
+class GpsSilentGapTracker(private val thresholdMillis: Long = 5_000L) {
+    private var lastCallbackElapsedRealtimeMillis: Long = 0L
+    private var reportedForCurrentGap = false
+
+    fun reset(startElapsedRealtimeMillis: Long) {
+        lastCallbackElapsedRealtimeMillis = startElapsedRealtimeMillis
+        reportedForCurrentGap = false
+    }
+
+    fun recordCallback(elapsedRealtimeMillis: Long) {
+        lastCallbackElapsedRealtimeMillis = elapsedRealtimeMillis
+        reportedForCurrentGap = false
+    }
+
+    /** Returns the elapsed gap once, the first time it crosses the threshold; null otherwise (including for its continuation). */
+    fun checkGap(nowElapsedRealtimeMillis: Long): Long? {
+        if (reportedForCurrentGap) return null
+        val gap = nowElapsedRealtimeMillis - lastCallbackElapsedRealtimeMillis
+        if (gap < thresholdMillis) return null
+        reportedForCurrentGap = true
+        return gap
+    }
+}
+
 class SessionNotificationTracker {
     private var displayedText: String? = null
 
