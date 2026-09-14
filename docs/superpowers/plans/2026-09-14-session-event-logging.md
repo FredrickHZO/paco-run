@@ -1169,7 +1169,7 @@ Per spec 5.4:
 
         evaluator.accept(sample(8.7f, 0L)) // candidate TOO_FAST starts accumulating
         events.clear()
-        evaluator.accept(unreliableSample(1_000L))
+        evaluator.accept(unreliable(1_000L))
 
         assertEquals(
             listOf(
