@@ -1,9 +1,12 @@
 package dev.fred.pacorun.service
 
 import dev.fred.pacorun.audio.AudioCue
+import dev.fred.pacorun.eventlog.AudioCueEmittedEvent
 import dev.fred.pacorun.eventlog.DistanceChainBreakReason
 import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
 import dev.fred.pacorun.eventlog.SessionEvent
+import dev.fred.pacorun.eventlog.SpeedChainBreakReason
+import dev.fred.pacorun.eventlog.SpeedChainBrokenEvent
 import dev.fred.pacorun.location.LocationSample
 import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
@@ -201,6 +204,7 @@ class SessionCoordinator(
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
     private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
     private val onSpeedComputed: (Double?) -> Unit = {},
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
         process(elapsedRealtimeMillis, sample, position, signalGpsOutage = false)
@@ -214,6 +218,7 @@ class SessionCoordinator(
     private var latestReliableSample: LocationSample? = null
     private var outageActive = false
     private var lastReliableFixElapsedMillis: Long = startedAtElapsedMillis
+    private var speedChainBrokenReportedForOutage = false
     private var lastRoutineTimingBucket = Long.MIN_VALUE
     private var lastRoutineTimingElapsedRealtimeMillis = Long.MIN_VALUE
 
@@ -243,10 +248,12 @@ class SessionCoordinator(
         } else if (enteredOutage) {
             latestReliableSample = null
             outageActive = true
+            onEvent(DistanceChainBrokenEvent(elapsedRealtimeMillis, DistanceChainBreakReason.GPS_OUTAGE_ENTERED))
             distanceEngine.breakChain()
         }
         if (actualReliable) {
             lastReliableFixElapsedMillis = elapsedRealtimeMillis
+            speedChainBrokenReportedForOutage = false
         } else if (
             !gpsReliable &&
             elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
@@ -261,6 +268,15 @@ class SessionCoordinator(
             // G14 per il perché NON si allenta oltre questo (interruzioni lunghe + spostamento
             // reale nel frattempo restano un problema di Fase 1, deliberatamente non affrontato
             // qui).
+            // speedEngine.breakChain() stays unconditional -- calling it repeatedly for the same
+            // outage is deliberately idempotent (comment above, unchanged by this task). The
+            // event is different: without a guard, onEvent(...) here would fire once per tick for
+            // the entire outage. speedChainBrokenReportedForOutage makes it fire once per
+            // episode, reset the moment a fresh reliable fix arrives above.
+            if (!speedChainBrokenReportedForOutage) {
+                onEvent(SpeedChainBrokenEvent(elapsedRealtimeMillis, SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX))
+                speedChainBrokenReportedForOutage = true
+            }
             speedEngine.breakChain()
         }
         val distanceDelta = if (actualReliable) {
@@ -298,7 +314,19 @@ class SessionCoordinator(
         }
         latestPace = pace
         val cues = routine.cues.map { AudioCue.valueOf(it.name) } + listOfNotNull(pace.cue?.let { AudioCue.valueOf(it.name) })
-        if (cues.isNotEmpty()) onCues(cues, preferences.cueVolume)
+        if (cues.isNotEmpty()) {
+            onCues(cues, preferences.cueVolume)
+            cues.forEach {
+                onEvent(
+                    AudioCueEmittedEvent(
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        cueType = it.name,
+                        cumulativeDistanceMeters = routine.totalDistanceMeters,
+                        speedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+                    ),
+                )
+            }
+        }
         publish(
             RunSessionState.Running(
                 phase = routine.phase,
@@ -334,8 +362,10 @@ class PendingSessionCoordinator(
     private val paceEvaluator: SessionPaceEvaluator,
     private val onCues: (List<AudioCue>, Float) -> Unit,
     private val publish: (RunSessionState) -> Unit,
+    private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
     private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
     private val onSpeedComputed: (Double?) -> Unit = {},
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     private var activeCoordinator: SessionCoordinator? = null
 
@@ -364,8 +394,10 @@ class PendingSessionCoordinator(
             onCues = onCues,
             publish = publish,
             startedAtElapsedMillis = startedAtElapsedMillis,
+            distanceEngine = distanceEngine,
             speedEngine = speedEngine,
             onSpeedComputed = onSpeedComputed,
+            onEvent = onEvent,
         ).also { activeCoordinator = it }
 }
 

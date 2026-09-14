@@ -503,6 +503,124 @@ class SessionCoordinatorTest {
         assertEquals(2, speedEngine.breakChainCalls)
     }
 
+    @Test
+    fun everyEmittedCueProducesItsOwnAudioCueEmittedEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = true)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.TOO_FAST, 9f, Cue.TOO_FAST))
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(1_000L, reliableSample(9f, 1_000L), LocationPosition(0.0, 0.0, 1_000L))
+
+        val cueEvents = events.filterIsInstance<dev.fred.pacorun.eventlog.AudioCueEmittedEvent>()
+        assertEquals(
+            listOf("ROUTINE_START", "TOO_FAST"),
+            cueEvents.map { it.cueType },
+        )
+        assertEquals(3.0, cueEvents[0].cumulativeDistanceMeters, .001) // FakeRoutineEngine's fixed totalDistanceMeters
+        assertEquals(9f, cueEvents[0].speedKmh)
+    }
+
+    @Test
+    fun enteringOutageEmitsDistanceChainBrokenEventBeforeBreakingTheDistanceChain() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.DistanceChainBrokenEvent(
+                    1_000L,
+                    dev.fred.pacorun.eventlog.DistanceChainBreakReason.GPS_OUTAGE_ENTERED,
+                ),
+            ),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.DistanceChainBrokenEvent>(),
+        )
+    }
+
+    @Test
+    fun sustainedUnreliableStreamEmitsSpeedChainBrokenEventOnlyOnceAcrossTheWholeOutage() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        // DEFAULT_MAX_AGE_MILLIS is 3000ms -- the staleness gate first opens on this tick.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        // The gate stays open on every subsequent unreliable tick (elapsed keeps growing past the
+        // threshold) -- speedEngine.breakChain() is called again each time (idempotent, unchanged
+        // production behavior), but the event itself must not repeat.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    3_000L,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX,
+                ),
+            ),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>(),
+        )
+        assertEquals(3, speedEngine.breakChainCalls) // breakChain() itself still fires every stale tick (3000/4000/5000), unguarded
+    }
+
+    @Test
+    fun aFreshReliableFixAfterAnOutageAllowsTheEventToFireAgainOnTheNextOutage() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L)) // fires once
+        coordinator.tick(4_000L, reliableSample(8f, 4_000L), LocationPosition(0.0, .0004, 4_000L)) // outage ends
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+        coordinator.tick(6_000L, unreliableSample(6_000L), LocationPosition(0.0, .0006, 6_000L))
+        coordinator.tick(7_000L, unreliableSample(7_000L), LocationPosition(0.0, .0007, 7_000L)) // fires again, new episode
+
+        assertEquals(
+            listOf(3_000L, 7_000L),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>().map { it.elapsedRealtimeMillis },
+        )
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,
