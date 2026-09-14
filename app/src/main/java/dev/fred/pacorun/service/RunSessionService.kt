@@ -178,6 +178,7 @@ class RunSessionService : Service() {
             speedAccuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond,
             reliable = sample.reliable,
             speedEstimatorKmh = lastEngineSpeedKmh,
+            elapsedRealtimeMillis = position.elapsedRealtimeMillis,
         )
     }
 

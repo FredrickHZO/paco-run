@@ -15,6 +15,10 @@ data class TrackPoint(
     // Diagnostic-only: SpeedEstimator's own speed output for this fix. Null when the fix was
     // completely unreliable (the engine was never called for it) -- see RunSessionService.
     val speedEstimatorKmh: Double?,
+    // SystemClock.elapsedRealtime()-based, monotone timestamp of this exact fix -- the join key
+    // against the new SessionEvent log (which also keys on elapsedRealtimeMillis, not wall
+    // clock). See session-event-logging-design.md Decision 4.
+    val elapsedRealtimeMillis: Long,
 )
 
 // Standard GPX 1.1 trkpt/time so any GPX viewer (or Strava, for a side-by-side comparison)
@@ -50,6 +54,7 @@ object GpxWriter {
         point.speedAccuracyMps?.let { appendLine("          <pr:speedAccuracyMps>$it</pr:speedAccuracyMps>") }
         appendLine("          <pr:reliable>${point.reliable}</pr:reliable>")
         point.speedEstimatorKmh?.let { appendLine("          <pr:speedEstimatorKmh>$it</pr:speedEstimatorKmh>") }
+        appendLine("          <pr:elapsedRealtimeMillis>${point.elapsedRealtimeMillis}</pr:elapsedRealtimeMillis>")
         appendLine("        </extensions>")
         appendLine("      </trkpt>")
     }
