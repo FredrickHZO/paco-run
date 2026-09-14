@@ -8,6 +8,11 @@ import java.util.concurrent.TimeUnit
 class LocationSampleMapper(
     private val maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS,
     private val maxSpeedAccuracyMps: Float = .35f,
+    // A fix with good speed accuracy can still have a poor horizontal (position) fix -- speed
+    // is derived largely from Doppler/carrier measurements and can stay accurate even when the
+    // position itself is tens of meters off. 20m rejects fixes that are clearly degraded
+    // (typical open-sky accuracy is 3-5m, urban-canyon/tree-cover commonly 10-30m) while not
+    // rejecting ordinary conditions.
     private val maxHorizontalAccuracyMeters: Float = 20f,
 ) {
     fun map(location: Location, nowElapsedRealtimeMillis: Long): LocationSample {

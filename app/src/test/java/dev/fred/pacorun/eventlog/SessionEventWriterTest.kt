@@ -167,5 +167,9 @@ class SessionEventWriterTest {
         assertEquals(true, line.contains("\"sensors\":{\"hasBarometer\":true"))
         assertEquals(true, line.contains("\"networkTypeAtStart\":\"WIFI\""))
         assertEquals(false, line.contains("null"))
+        // Float -> Double must go through the String round-trip: a direct cast would render the
+        // default cueVolume of 0.6f as 0.6000000238418579.
+        assertEquals(true, line.contains("\"cueVolume\":0.6"))
+        assertEquals(false, line.contains("0.6000000238418579"))
     }
 }

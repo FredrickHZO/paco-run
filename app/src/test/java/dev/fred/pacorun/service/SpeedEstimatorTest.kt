@@ -524,6 +524,23 @@ class SpeedEstimatorTest {
         assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
     }
 
+    @Test
+    fun lastAcceptWasMeasurementIsTrueOnlyForFixesThatRanARealKalmanUpdate() {
+        val estimator = SpeedEstimator()
+
+        assertEquals(false, estimator.getLastAcceptWasMeasurement()) // before any accept()
+
+        estimator.accept(fix(45.4642, 9.1900, 0L), reliable = true)
+        assertEquals(false, estimator.getLastAcceptWasMeasurement()) // init branch, no update yet
+
+        estimator.accept(fix(45.4643, 9.1900, 1_000L), reliable = true)
+        assertEquals(true, estimator.getLastAcceptWasMeasurement())
+
+        // Non-positive dt breaks the chain without a measurement -- must not keep reporting true.
+        estimator.accept(fix(45.4644, 9.1900, 1_000L), reliable = true)
+        assertEquals(false, estimator.getLastAcceptWasMeasurement())
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

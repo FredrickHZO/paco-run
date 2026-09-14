@@ -11,7 +11,7 @@ import java.time.format.DateTimeFormatter
 // in a Files app / file manager for the user to send elsewhere -- exactly the point of this
 // export, since it's meant to leave the device for a comparison against another data source.
 object GpxExporter {
-    private val fileNameTimestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")
+    private val fileNameTimestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")
 
     fun fileNameFor(startedAt: Instant): String = "paco-run-${timestampFor(startedAt)}.gpx"
 

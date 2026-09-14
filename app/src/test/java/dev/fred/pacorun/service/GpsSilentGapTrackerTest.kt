@@ -6,41 +6,37 @@ import org.junit.Test
 
 class GpsSilentGapTrackerTest {
     @Test
-    fun noGapBeforeThresholdReturnsNull() {
+    fun callbackWithinThresholdReportsNoGap() {
         val tracker = GpsSilentGapTracker(thresholdMillis = 5_000L)
         tracker.reset(0L)
 
-        assertNull(tracker.checkGap(4_999L))
+        assertNull(tracker.recordCallback(4_999L))
     }
 
     @Test
-    fun gapAtOrAboveThresholdReturnsItOnce() {
+    fun callbackAfterARealGapReportsItsActualDuration() {
         val tracker = GpsSilentGapTracker(thresholdMillis = 5_000L)
         tracker.reset(0L)
+        tracker.recordCallback(1_000L)
 
-        assertEquals(5_000L, tracker.checkGap(5_000L))
-        assertNull(tracker.checkGap(6_000L)) // same silent episode -- already reported
+        assertEquals(12_000L, tracker.recordCallback(13_000L))
     }
 
     @Test
-    fun aNewCallbackAllowsANewGapToBeReportedAgain() {
+    fun aShortCallbackAfterAReportedGapMeasuresOnlyTheNewInterval() {
         val tracker = GpsSilentGapTracker(thresholdMillis = 5_000L)
         tracker.reset(0L)
-        tracker.checkGap(5_000L)
+        assertEquals(9_000L, tracker.recordCallback(9_000L))
 
-        tracker.recordCallback(6_000L)
-
-        assertNull(tracker.checkGap(10_999L))
-        assertEquals(5_000L, tracker.checkGap(11_000L))
+        assertNull(tracker.recordCallback(10_000L))
     }
 
     @Test
-    fun resetEstablishesTheBaselineForAPreFirstFixGap() {
+    fun resetEstablishesTheBaselineForAGapMeasuredFromSessionStart() {
         val tracker = GpsSilentGapTracker(thresholdMillis = 5_000L)
 
         tracker.reset(1_000L)
 
-        assertNull(tracker.checkGap(5_999L))
-        assertEquals(5_000L, tracker.checkGap(6_000L))
+        assertEquals(6_000L, tracker.recordCallback(7_000L))
     }
 }

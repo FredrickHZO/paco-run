@@ -74,25 +74,20 @@ class GpsFreshnessTracker(
 
 class GpsSilentGapTracker(private val thresholdMillis: Long = 5_000L) {
     private var lastCallbackElapsedRealtimeMillis: Long = 0L
-    private var reportedForCurrentGap = false
 
     fun reset(startElapsedRealtimeMillis: Long) {
         lastCallbackElapsedRealtimeMillis = startElapsedRealtimeMillis
-        reportedForCurrentGap = false
     }
 
-    fun recordCallback(elapsedRealtimeMillis: Long) {
+    /**
+     * Call on every location callback (reliable or not). Returns the elapsed gap since the
+     * previous callback (or [reset]) if it reached the threshold, meaning a silent gap just
+     * ended; null otherwise. Always advances the baseline for the next gap regardless.
+     */
+    fun recordCallback(elapsedRealtimeMillis: Long): Long? {
+        val gap = elapsedRealtimeMillis - lastCallbackElapsedRealtimeMillis
         lastCallbackElapsedRealtimeMillis = elapsedRealtimeMillis
-        reportedForCurrentGap = false
-    }
-
-    /** Returns the elapsed gap once, the first time it crosses the threshold; null otherwise (including for its continuation). */
-    fun checkGap(nowElapsedRealtimeMillis: Long): Long? {
-        if (reportedForCurrentGap) return null
-        val gap = nowElapsedRealtimeMillis - lastCallbackElapsedRealtimeMillis
-        if (gap < thresholdMillis) return null
-        reportedForCurrentGap = true
-        return gap
+        return if (gap >= thresholdMillis) gap else null
     }
 }
 

@@ -39,21 +39,25 @@ object SessionEventWriter {
         raw("runRange", speedRange(preferences.runRange))
         boolean("walkUsesConstantRange", preferences.walkUsesConstantRange)
         raw("walkRange", speedRange(preferences.walkRange))
-        double("initialConstantKm", preferences.initialConstantKm.toDouble())
+        // Float -> Double via String round-trip, not a direct cast (same reason as
+        // RoutineEngine.kmToMeters): a direct cast carries the source Float's binary artifact
+        // into the JSON (0.6f becomes 0.6000000238418579), while the String round-trip restarts
+        // from the clean decimal the Float actually displays.
+        double("initialConstantKm", preferences.initialConstantKm.toString().toDouble())
         int("runSeconds", preferences.runSeconds)
         int("walkSeconds", preferences.walkSeconds)
         boolean("routineUnlimited", preferences.routineUnlimited)
-        double("routineKm", preferences.routineKm.toDouble())
+        double("routineKm", preferences.routineKm.toString().toDouble())
         int("confirmationSamples", preferences.confirmationSamples)
         long("repeatMillis", preferences.repeatMillis)
         boolean("gpsCuesEnabled", preferences.gpsCuesEnabled)
-        double("cueVolume", preferences.cueVolume.toDouble())
+        double("cueVolume", preferences.cueVolume.toString().toDouble())
         boolean("dynamicColor", preferences.dynamicColor)
     }
 
     private fun speedRange(range: dev.fred.pacorun.settings.SpeedRange) = json {
-        double("minKmh", range.minKmh.toDouble())
-        double("maxKmh", range.maxKmh.toDouble())
+        double("minKmh", range.minKmh.toString().toDouble())
+        double("maxKmh", range.maxKmh.toString().toDouble())
     }
 
     private fun sensorAvailability(sensors: SensorAvailability) = json {

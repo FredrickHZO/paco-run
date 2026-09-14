@@ -115,6 +115,11 @@ class SpeedEstimator(
     // the burst started.
     private var accuracyBaselineMeters: Double? = null
     private var lastAccuracyGateEngaged: Boolean = false
+    // False whenever the last accept() returned without performing a real Kalman update (first
+    // fix of a chain, or any breakChain() path): in those cases lastProcessNoise /
+    // lastAccuracyGateEngaged still hold an earlier fix's values, so a caller reporting them as
+    // this fix's diagnostics would be reporting stale data.
+    private var lastAcceptWasMeasurement = false
 
     // Test/debugging accessors (internal visibility)
     internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
@@ -122,6 +127,7 @@ class SpeedEstimator(
     internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
     internal fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
         if (lastProcessNoise == qHigh) ProcessNoiseRegime.Q_HIGH else ProcessNoiseRegime.Q_LOW
+    internal fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) {
@@ -146,6 +152,7 @@ class SpeedEstimator(
             northAxis = AxisKalman(y)
             lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
             accuracyBaselineMeters = accuracyMeters
+            lastAcceptWasMeasurement = false
             return 0.0
         }
 
@@ -172,6 +179,7 @@ class SpeedEstimator(
             qLow
         }
         lastProcessNoise = processNoise
+        lastAcceptWasMeasurement = true
         east.predict(dtSeconds, processNoise)
         north.predict(dtSeconds, processNoise)
 
@@ -200,6 +208,7 @@ class SpeedEstimator(
         eastInnovationEma = 0.0
         northInnovationEma = 0.0
         accuracyBaselineMeters = null
+        lastAcceptWasMeasurement = false
         return 0.0
     }
 

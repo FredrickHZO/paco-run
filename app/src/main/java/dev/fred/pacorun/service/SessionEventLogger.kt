@@ -33,6 +33,10 @@ class SessionEventLogger(private val context: Context) {
     fun log(event: SessionEvent) {
         try {
             outputStream?.write((SessionEventWriter.toJsonLine(event) + "\n").toByteArray(Charsets.UTF_8))
+            // flush() is a defensive no-op for the current MediaStore stream type -- write()
+            // already reaches the OS immediately via the underlying ParcelFileDescriptor, so
+            // durability comes from the write above, not from here. Kept in case a future stream
+            // implementation buffers internally.
             outputStream?.flush()
         } catch (_: Exception) {
         }

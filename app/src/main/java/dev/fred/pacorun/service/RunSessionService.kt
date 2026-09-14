@@ -88,6 +88,13 @@ class RunSessionService : Service() {
     private var sessionStartedAtInstant: Instant = Instant.EPOCH
     private var eventLogger: SessionEventLogger? = null
     private var onEvent: (SessionEvent) -> Unit = {}
+    // Causal ordering inside one onLocation() callback: coordinator.tick() synchronously fires
+    // the events a fix *causes* (cues, phase changes, chain breaks), but LocationFixEvent can
+    // only be built after tick() has run, because its speedEstimatorDiagnostics are only correct
+    // once SpeedEstimator.accept() has processed this fix. Buffering tick()'s events lets the fix
+    // event be written first and its consequences after it.
+    private var bufferingLocationEvents = false
+    private val pendingEventsDuringTick = mutableListOf<SessionEvent>()
     private var locationSequenceNumber = 0
     private var speedEstimatorForDiagnostics: SpeedEstimator? = null
     private var gnssStatusCallback: GnssStatus.Callback? = null
@@ -175,7 +182,12 @@ class RunSessionService : Service() {
 
         eventLogger = SessionEventLogger(applicationContext)
         eventLogger?.start(GpxExporter.eventLogFileNameFor(sessionStartedAtInstant))
-        onEvent = { eventLogger?.log(it) }
+        // Every domain object below captures THIS lambda instance once; reassigning the field
+        // later would not redirect them, so the buffering switch lives inside the lambda body,
+        // reading the service's live properties on each invocation.
+        onEvent = { event ->
+            if (bufferingLocationEvents) pendingEventsDuringTick += event else eventLogger?.log(event)
+        }
 
         val marker = restartMarkerPrefs()
         if (marker.getBoolean(KEY_SESSION_OPEN, false)) {
@@ -292,7 +304,10 @@ class RunSessionService : Service() {
         val mapper = LocationSampleMapper()
         val sample = mapper.map(location, now)
         gpsFreshness.record(sample)
-        gpsSilentGap.recordCallback(now)
+        val silentGap = gpsSilentGap.recordCallback(now)
+        if (silentGap != null) {
+            onEvent(GpsSilentGapEvent(now, silentGap))
+        }
         val position = LocationPosition(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -300,7 +315,9 @@ class RunSessionService : Service() {
             horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
         )
         lastEngineSpeedKmh = null
+        bufferingLocationEvents = true
         coordinator?.tick(elapsedRealtimeMillis = now, sample = sample, position = position)
+        bufferingLocationEvents = false
         trackPoints += TrackPoint(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -325,9 +342,9 @@ class RunSessionService : Service() {
         val estimator = speedEstimatorForDiagnostics
         onEvent(
             LocationFixEvent(
-                elapsedRealtimeMillis = position.elapsedRealtimeMillis,
+                elapsedRealtimeMillis = now,
                 sequenceNumber = locationSequenceNumber++,
-                elapsedSinceStartMillis = position.elapsedRealtimeMillis - sessionStartedAtElapsedMillis,
+                elapsedSinceStartMillis = now - sessionStartedAtElapsedMillis,
                 provider = location.provider,
                 reliable = reliability.reliable,
                 rejectionReasons = reliability.reasons,
@@ -336,7 +353,7 @@ class RunSessionService : Service() {
                 satelliteCn0AvgDbHz = snapshot?.cn0AvgDbHz,
                 satelliteCn0MaxDbHz = snapshot?.cn0MaxDbHz,
                 qualityTier = mapper.qualityTier(reliability, speedAccuracyMps, horizontalAccuracyMeters),
-                speedEstimatorDiagnostics = if (reliability.reliable && estimator != null) {
+                speedEstimatorDiagnostics = if (reliability.reliable && estimator != null && estimator.getLastAcceptWasMeasurement()) {
                     SpeedEstimatorDiagnostics(
                         processNoiseRegime = estimator.getLastProcessNoiseRegime(),
                         accuracyGateEngaged = estimator.getLastAccuracyGateEngaged(),
@@ -347,6 +364,9 @@ class RunSessionService : Service() {
                 },
             ),
         )
+        val buffered = pendingEventsDuringTick.toList()
+        pendingEventsDuringTick.clear()
+        buffered.forEach { onEvent(it) }
     }
 
     private fun tickTimer(elapsedRealtimeMillis: Long) {
@@ -354,9 +374,6 @@ class RunSessionService : Service() {
         if (second == lastTimerSecond) return
         lastTimerSecond = second
         val gpsOutage = gpsFreshness.isOutage(elapsedRealtimeMillis)
-        gpsSilentGap.checkGap(elapsedRealtimeMillis)?.let { gap ->
-            onEvent(GpsSilentGapEvent(elapsedRealtimeMillis, gap))
-        }
         sampleDeviceHealthIfDue(elapsedRealtimeMillis)
         coordinator?.advanceTimer(elapsedRealtimeMillis, signalGpsOutage = gpsOutage)
     }
