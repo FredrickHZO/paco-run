@@ -1,6 +1,9 @@
 package dev.fred.pacorun.service
 
 import dev.fred.pacorun.audio.AudioCue
+import dev.fred.pacorun.eventlog.DistanceChainBreakReason
+import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
+import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.location.LocationSample
 import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
@@ -110,6 +113,7 @@ class DistanceAccumulator(
     // Half the combined accuracy of the two points is a standard "more likely real than noise"
     // heuristic for roughly-Gaussian position error.
     private val jitterAccuracyFraction: Double = 0.5,
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) : SessionDistanceEngine {
     private var anchor: LocationPosition? = null
     // Last accepted raw fix, tracked separately from `anchor`: the anchor can stay frozen for
@@ -119,7 +123,10 @@ class DistanceAccumulator(
     private var lastFix: LocationPosition? = null
 
     override fun accept(position: LocationPosition, reliable: Boolean): Double {
-        if (!reliable || !position.isValid()) return breakChain()
+        if (!reliable || !position.isValid()) {
+            onEvent(DistanceChainBrokenEvent(position.elapsedRealtimeMillis, DistanceChainBreakReason.UNRELIABLE_OR_INVALID_FIX))
+            return breakChain()
+        }
         val previousAnchor = anchor
         val previousFix = lastFix
         if (previousAnchor == null || previousFix == null) {
@@ -130,9 +137,8 @@ class DistanceAccumulator(
         val fixElapsedMillis = position.elapsedRealtimeMillis - previousFix.elapsedRealtimeMillis
         val fixDistance = haversineMeters(previousFix, position)
         if (fixElapsedMillis <= 0L || !fixDistance.isFinite() || fixDistance > maxSpeedMetersPerSecond * fixElapsedMillis / 1_000.0) {
-            anchor = null
-            lastFix = null
-            return 0.0
+            onEvent(DistanceChainBrokenEvent(position.elapsedRealtimeMillis, DistanceChainBreakReason.IMPLAUSIBLE_JUMP))
+            return breakChain()
         }
         lastFix = position
         // Below the jitter threshold: leave the anchor where it is, so noise oscillating
