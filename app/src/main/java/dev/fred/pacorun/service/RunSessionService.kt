@@ -35,10 +35,12 @@ import dev.fred.pacorun.R
 import dev.fred.pacorun.audio.CuePlayer
 import dev.fred.pacorun.eventlog.AppLifecycleChangedEvent
 import dev.fred.pacorun.eventlog.LifecycleTransition
+import dev.fred.pacorun.eventlog.LocationFixEvent
 import dev.fred.pacorun.eventlog.NetworkType
 import dev.fred.pacorun.eventlog.SensorAvailability
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SessionStarted
+import dev.fred.pacorun.eventlog.SpeedEstimatorDiagnostics
 import dev.fred.pacorun.export.GpxExporter
 import dev.fred.pacorun.export.GpxWriter
 import dev.fred.pacorun.export.TrackPoint
@@ -281,13 +283,13 @@ class RunSessionService : Service() {
         getSharedPreferences("session_event_logging", MODE_PRIVATE)
 
     private fun onLocation(location: Location) {
-        // Unchanged from Task 8 as of this task -- Task 14 extends this same function further
-        // (LocationFixEvent construction), shown there as its own full replacement.
         if (location.elapsedRealtimeNanos <= lastLocationElapsedRealtimeNanos) return
         lastLocationElapsedRealtimeNanos = location.elapsedRealtimeNanos
         val now = SystemClock.elapsedRealtime()
-        val sample = LocationSampleMapper().map(location, now)
+        val mapper = LocationSampleMapper()
+        val sample = mapper.map(location, now)
         gpsFreshness.record(sample)
+        gpsSilentGap.recordCallback(now)
         val position = LocationPosition(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -306,6 +308,41 @@ class RunSessionService : Service() {
             reliable = sample.reliable,
             speedEstimatorKmh = lastEngineSpeedKmh,
             elapsedRealtimeMillis = position.elapsedRealtimeMillis,
+        )
+
+        val speedAccuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond
+        val horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy
+        val reliability = mapper.evaluate(
+            speedMps = location.takeIf { it.hasSpeed() }?.speed,
+            accuracyMps = speedAccuracyMps,
+            ageMillis = now - position.elapsedRealtimeMillis,
+            horizontalAccuracyMeters = horizontalAccuracyMeters,
+        )
+        val snapshot = lastGnssSnapshot
+        val estimator = speedEstimatorForDiagnostics
+        onEvent(
+            LocationFixEvent(
+                elapsedRealtimeMillis = position.elapsedRealtimeMillis,
+                sequenceNumber = locationSequenceNumber++,
+                elapsedSinceStartMillis = position.elapsedRealtimeMillis - sessionStartedAtElapsedMillis,
+                provider = location.provider,
+                reliable = reliability.reliable,
+                rejectionReasons = reliability.reasons,
+                satellitesUsedInFix = snapshot?.satellitesUsedInFix,
+                satelliteCn0MinDbHz = snapshot?.cn0MinDbHz,
+                satelliteCn0AvgDbHz = snapshot?.cn0AvgDbHz,
+                satelliteCn0MaxDbHz = snapshot?.cn0MaxDbHz,
+                qualityTier = mapper.qualityTier(reliability, speedAccuracyMps, horizontalAccuracyMeters),
+                speedEstimatorDiagnostics = if (reliability.reliable && estimator != null) {
+                    SpeedEstimatorDiagnostics(
+                        processNoiseRegime = estimator.getLastProcessNoiseRegime(),
+                        accuracyGateEngaged = estimator.getLastAccuracyGateEngaged(),
+                        innovationEmaMagnitude = estimator.getLastInnovationEma(),
+                    )
+                } else {
+                    null
+                },
+            ),
         )
     }
 
