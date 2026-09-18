@@ -1,7 +1,35 @@
+import org.gradle.api.provider.ValueSource
+import org.gradle.api.provider.ValueSourceParameters
+import org.gradle.process.ExecOperations
+import java.io.ByteArrayOutputStream
+import javax.inject.Inject
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
 }
+
+abstract class GitCommitHashValueSource : ValueSource<String, ValueSourceParameters.None> {
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    override fun obtain(): String {
+        val output = ByteArrayOutputStream()
+        return try {
+            val result = execOperations.exec {
+                commandLine("git", "rev-parse", "--short=12", "HEAD")
+                standardOutput = output
+                isIgnoreExitValue = true
+            }
+            if (result.exitValue != 0) return "unknown"
+            output.toString(Charsets.UTF_8.name()).trim().ifEmpty { "unknown" }
+        } catch (e: Exception) {
+            "unknown"
+        }
+    }
+}
+
+val gitCommitHash: String = providers.of(GitCommitHashValueSource::class) {}.get()
 
 android {
     namespace = "dev.fred.pacorun"
@@ -13,6 +41,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "GIT_COMMIT_HASH", "\"$gitCommitHash\"")
     }
 
     buildTypes {
@@ -28,7 +57,7 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
     }
 

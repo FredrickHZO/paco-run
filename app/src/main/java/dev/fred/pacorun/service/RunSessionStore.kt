@@ -1,12 +1,19 @@
 package dev.fred.pacorun.service
 
 import dev.fred.pacorun.audio.AudioCue
+import dev.fred.pacorun.eventlog.AudioCueEmittedEvent
+import dev.fred.pacorun.eventlog.DistanceChainBreakReason
+import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
+import dev.fred.pacorun.eventlog.SessionEvent
+import dev.fred.pacorun.eventlog.SpeedChainBreakReason
+import dev.fred.pacorun.eventlog.SpeedChainBrokenEvent
 import dev.fred.pacorun.location.LocationSample
 import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
 import dev.fred.pacorun.pace.PaceEvaluator
 import dev.fred.pacorun.pace.PaceResult
 import dev.fred.pacorun.pace.PaceState
+import dev.fred.pacorun.routine.RoutineCue
 import dev.fred.pacorun.routine.RoutineEngine
 import dev.fred.pacorun.routine.RoutineInput
 import dev.fred.pacorun.routine.RoutinePhase
@@ -18,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.asin
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -66,6 +74,25 @@ class GpsFreshnessTracker(
     } ?: true
 }
 
+class GpsSilentGapTracker(private val thresholdMillis: Long = 5_000L) {
+    private var lastCallbackElapsedRealtimeMillis: Long = 0L
+
+    fun reset(startElapsedRealtimeMillis: Long) {
+        lastCallbackElapsedRealtimeMillis = startElapsedRealtimeMillis
+    }
+
+    /**
+     * Call on every location callback (reliable or not). Returns the elapsed gap since the
+     * previous callback (or [reset]) if it reached the threshold, meaning a silent gap just
+     * ended; null otherwise. Always advances the baseline for the next gap regardless.
+     */
+    fun recordCallback(elapsedRealtimeMillis: Long): Long? {
+        val gap = elapsedRealtimeMillis - lastCallbackElapsedRealtimeMillis
+        lastCallbackElapsedRealtimeMillis = elapsedRealtimeMillis
+        return if (gap >= thresholdMillis) gap else null
+    }
+}
+
 class SessionNotificationTracker {
     private var displayedText: String? = null
 
@@ -110,6 +137,7 @@ class DistanceAccumulator(
     // Half the combined accuracy of the two points is a standard "more likely real than noise"
     // heuristic for roughly-Gaussian position error.
     private val jitterAccuracyFraction: Double = 0.5,
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) : SessionDistanceEngine {
     private var anchor: LocationPosition? = null
     // Last accepted raw fix, tracked separately from `anchor`: the anchor can stay frozen for
@@ -119,7 +147,10 @@ class DistanceAccumulator(
     private var lastFix: LocationPosition? = null
 
     override fun accept(position: LocationPosition, reliable: Boolean): Double {
-        if (!reliable || !position.isValid()) return breakChain()
+        if (!reliable || !position.isValid()) {
+            onEvent(DistanceChainBrokenEvent(position.elapsedRealtimeMillis, DistanceChainBreakReason.UNRELIABLE_OR_INVALID_FIX))
+            return breakChain()
+        }
         val previousAnchor = anchor
         val previousFix = lastFix
         if (previousAnchor == null || previousFix == null) {
@@ -130,9 +161,8 @@ class DistanceAccumulator(
         val fixElapsedMillis = position.elapsedRealtimeMillis - previousFix.elapsedRealtimeMillis
         val fixDistance = haversineMeters(previousFix, position)
         if (fixElapsedMillis <= 0L || !fixDistance.isFinite() || fixDistance > maxSpeedMetersPerSecond * fixElapsedMillis / 1_000.0) {
-            anchor = null
-            lastFix = null
-            return 0.0
+            onEvent(DistanceChainBrokenEvent(position.elapsedRealtimeMillis, DistanceChainBreakReason.IMPLAUSIBLE_JUMP))
+            return breakChain()
         }
         lastFix = position
         // Below the jitter threshold: leave the anchor where it is, so noise oscillating
@@ -169,7 +199,27 @@ interface SessionRoutineEngine {
 
 interface SessionPaceEvaluator {
     fun updateConfig(config: PaceConfig)
-    fun accept(sample: LocationSample): PaceResult
+    fun accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceResult
+}
+
+interface SessionSpeedEngine {
+    fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double
+    fun breakChain(): Double
+}
+
+interface SessionPaceSmoothingEngine {
+    /** Fuses a new raw speed reading into the smoothed value, returns the updated value. */
+    fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float
+    /** Discards all accumulated memory; the next [accept] restarts from scratch, from the raw value. */
+    fun purge()
+}
+
+class DopplerSpeedEngine : SessionSpeedEngine {
+    override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double =
+        sample.speedKmh.toDouble()
+
+    // No chain to break for an instantaneous Doppler reading -- no-op, only here to satisfy the interface.
+    override fun breakChain(): Double = 0.0
 }
 
 class SessionCoordinator(
@@ -180,6 +230,10 @@ class SessionCoordinator(
     private val publish: (RunSessionState) -> Unit,
     private val startedAtElapsedMillis: Long = 0L,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
+    private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
+    private val paceSmoother: SessionPaceSmoothingEngine = EmaPaceSmoother(),
+    private val onSpeedComputed: (Double?) -> Unit = {},
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     fun tick(elapsedRealtimeMillis: Long, sample: LocationSample?, position: LocationPosition?) {
         process(elapsedRealtimeMillis, sample, position, signalGpsOutage = false)
@@ -192,6 +246,8 @@ class SessionCoordinator(
     private var latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
     private var latestReliableSample: LocationSample? = null
     private var outageActive = false
+    private var lastReliableFixElapsedMillis: Long = startedAtElapsedMillis
+    private var speedChainBrokenReportedForOutage = false
     private var lastRoutineTimingBucket = Long.MIN_VALUE
     private var lastRoutineTimingElapsedRealtimeMillis = Long.MIN_VALUE
 
@@ -206,7 +262,11 @@ class SessionCoordinator(
         val timerRetainsFreshGps = sample == null && !signalGpsOutage && latestReliableSample != null
         val gpsReliable = actualReliable || timerRetainsFreshGps
         val paceSample = when {
-            actualReliable -> requireNotNull(sample)
+            actualReliable -> {
+                val engineSpeedKmh = speedEngine.accept(requireNotNull(sample), requireNotNull(position), reliable = true)
+                onSpeedComputed(engineSpeedKmh)
+                requireNotNull(sample).copy(speedKmh = engineSpeedKmh.toFloat())
+            }
             timerRetainsFreshGps -> requireNotNull(latestReliableSample)
             else -> sample ?: LocationSample(0f, null, false, elapsedRealtimeMillis)
         }
@@ -217,7 +277,37 @@ class SessionCoordinator(
         } else if (enteredOutage) {
             latestReliableSample = null
             outageActive = true
+            onEvent(DistanceChainBrokenEvent(elapsedRealtimeMillis, DistanceChainBreakReason.GPS_OUTAGE_ENTERED))
             distanceEngine.breakChain()
+        }
+        if (actualReliable) {
+            lastReliableFixElapsedMillis = elapsedRealtimeMillis
+            speedChainBrokenReportedForOutage = false
+        } else if (
+            !gpsReliable &&
+            elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
+        ) {
+            // Tempo REALE trascorso dall'ultimo fix affidabile, non "che tipo di chiamata ha
+            // innescato la transizione" (il gate del Task 9 confondeva le due cose: un flusso
+            // continuo di fix inaffidabili non passa mai da qui con signalGpsOutage=true, quindi
+            // non si resettava mai, non importa quanto durasse -- vedi review Task 9).
+            // Chiamare breakChain() più volte nello stesso episodio è innocuo (idempotente),
+            // quindi non serve un flag "già fatto per questo episodio". Stessa soglia usata
+            // altrove nel progetto per lo stesso concetto (non una soglia nuova). Vedi roadmap
+            // G14 per il perché NON si allenta oltre questo (interruzioni lunghe + spostamento
+            // reale nel frattempo restano un problema di Fase 1, deliberatamente non affrontato
+            // qui).
+            // speedEngine.breakChain() stays unconditional -- calling it repeatedly for the same
+            // outage is deliberately idempotent (comment above, unchanged by this task). The
+            // event is different: without a guard, onEvent(...) here would fire once per tick for
+            // the entire outage. speedChainBrokenReportedForOutage makes it fire once per
+            // episode, reset the moment a fresh reliable fix arrives above.
+            if (!speedChainBrokenReportedForOutage) {
+                onEvent(SpeedChainBrokenEvent(elapsedRealtimeMillis, SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX))
+                speedChainBrokenReportedForOutage = true
+            }
+            speedEngine.breakChain()
+            paceSmoother.purge()
         }
         val distanceDelta = if (actualReliable) {
             distanceEngine.accept(requireNotNull(position), reliable = true)
@@ -232,6 +322,13 @@ class SessionCoordinator(
                 gpsReliable = gpsReliable,
             ),
         )
+        // The RUN/WALK warning fires ~10s before the real transition, with no advance notice for
+        // the CONSTANT_BEFORE->RUN warmup boundary -- purging here is speculative (spec Decision
+        // 4.2: unverified on real data, a one-line change to remove if the next real run disproves
+        // it), separate from the reactive 4.1 purge below.
+        if (routine.cues.any { it == RoutineCue.WALK_IN_TEN || it == RoutineCue.RUN_IN_TEN }) {
+            paceSmoother.purge()
+        }
         if (routine.profileChanged) {
             paceEvaluator.updateConfig(
                 PaceConfig(
@@ -242,19 +339,46 @@ class SessionCoordinator(
                     gpsCuesEnabled = preferences.gpsCuesEnabled,
                 ),
             )
+            paceSmoother.purge()
             latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         }
         if (routine.profileChanged && wasOutage) {
             latestPace = paceEvaluator.accept(LocationSample(0f, null, false, elapsedRealtimeMillis)).copy(cue = null)
         }
+        // All three purge triggers above run before this point in the same tick, so a fresh raw
+        // sample arriving on a purge tick is always the first post-purge sample -- returned raw,
+        // per EmaPaceSmoother's own contract -- never fused into stale pre-purge memory first.
+        val smoothedSpeedKmh = if (actualReliable) {
+            paceSmoother.accept(paceSample.speedKmh, elapsedRealtimeMillis)
+        } else {
+            paceSample.speedKmh
+        }
         val pace = when {
-            sample != null -> paceEvaluator.accept(paceSample)
-            signalGpsOutage && enteredOutage -> paceEvaluator.accept(paceSample)
+            sample != null -> paceEvaluator.accept(
+                paceSample.copy(speedKmh = smoothedSpeedKmh),
+                rawSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+            )
+            signalGpsOutage && enteredOutage -> paceEvaluator.accept(
+                paceSample.copy(speedKmh = smoothedSpeedKmh),
+                rawSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+            )
             else -> latestPace
         }
         latestPace = pace
         val cues = routine.cues.map { AudioCue.valueOf(it.name) } + listOfNotNull(pace.cue?.let { AudioCue.valueOf(it.name) })
-        if (cues.isNotEmpty()) onCues(cues, preferences.cueVolume)
+        if (cues.isNotEmpty()) {
+            onCues(cues, preferences.cueVolume)
+            cues.forEach {
+                onEvent(
+                    AudioCueEmittedEvent(
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        cueType = it.name,
+                        cumulativeDistanceMeters = routine.totalDistanceMeters,
+                        speedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+                    ),
+                )
+            }
+        }
         publish(
             RunSessionState.Running(
                 phase = routine.phase,
@@ -290,6 +414,11 @@ class PendingSessionCoordinator(
     private val paceEvaluator: SessionPaceEvaluator,
     private val onCues: (List<AudioCue>, Float) -> Unit,
     private val publish: (RunSessionState) -> Unit,
+    private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
+    private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
+    private val paceSmoother: SessionPaceSmoothingEngine = EmaPaceSmoother(),
+    private val onSpeedComputed: (Double?) -> Unit = {},
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     private var activeCoordinator: SessionCoordinator? = null
 
@@ -318,6 +447,11 @@ class PendingSessionCoordinator(
             onCues = onCues,
             publish = publish,
             startedAtElapsedMillis = startedAtElapsedMillis,
+            distanceEngine = distanceEngine,
+            speedEngine = speedEngine,
+            paceSmoother = paceSmoother,
+            onSpeedComputed = onSpeedComputed,
+            onEvent = onEvent,
         ).also { activeCoordinator = it }
 }
 
@@ -327,5 +461,58 @@ class RoutineEngineAdapter(private val engine: RoutineEngine) : SessionRoutineEn
 
 class PaceEvaluatorAdapter(private val evaluator: PaceEvaluator) : SessionPaceEvaluator {
     override fun updateConfig(config: PaceConfig) = evaluator.updateConfig(config)
-    override fun accept(sample: LocationSample) = evaluator.accept(sample)
+    // Kotlin forbids default parameter values on an override -- the interface's default already
+    // covers callers that omit the argument; this override just forwards whatever it receives.
+    override fun accept(sample: LocationSample, rawSpeedKmh: Float?) = evaluator.accept(sample, rawSpeedKmh)
+}
+
+class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstimator()) : SessionSpeedEngine {
+    override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double =
+        speedEstimator.accept(position, reliable)
+
+    override fun breakChain(): Double = speedEstimator.breakChain()
+}
+
+/**
+ * Time-normalized exponential moving average smoothing PaceEvaluator's speed input, so that
+ * [timeConstantSeconds] means the same thing regardless of the actual gap between reliable fixes
+ * (which isn't perfectly uniform -- unreliable fixes intermittently interrupt the stream). Not a
+ * fixed-length sliding window -- mirrors the EMA mechanism SpeedEstimator already validates in
+ * production for its own innovation tracking, rather than inventing a second smoothing primitive.
+ *
+ * timeConstantSeconds=6.0: derived from real pace-decision data during RUN phases (median gap
+ * between consecutive confirmed pace-state changes: 6.5s across 130 samples, a single real run,
+ * 2026-09-15) -- see docs/superpowers/specs/2026-09-18-phase-aware-pace-smoothing-design.md,
+ * Decision 1, for the full distribution and this estimate's explicit limits (that run's RUN band
+ * was 1.5 km/h -- more than double the 0.7 km/h band of the run that originally motivated this
+ * work, so this estimate is likely on the generous side for a narrow-band run). A starting
+ * estimate to revalidate on the next real run, not a final value -- same discipline as
+ * SpeedEstimator's qHigh/innovationEmaAlpha, not a RunPreferences user setting.
+ */
+class EmaPaceSmoother(
+    private val timeConstantSeconds: Double = 6.0,
+) : SessionPaceSmoothingEngine {
+    private var smoothedKmh: Double? = null
+    private var lastElapsedRealtimeMillis: Long? = null
+
+    override fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float {
+        val previousSmoothed = smoothedKmh
+        val previousElapsed = lastElapsedRealtimeMillis
+        lastElapsedRealtimeMillis = elapsedRealtimeMillis
+        if (previousSmoothed == null || previousElapsed == null) {
+            smoothedKmh = rawSpeedKmh.toDouble()
+            return rawSpeedKmh
+        }
+        val dtSeconds = (elapsedRealtimeMillis - previousElapsed) / 1_000.0
+        if (dtSeconds <= 0.0) return previousSmoothed.toFloat() // stale/duplicate tick, keep the previous value
+        val alpha = 1.0 - exp(-dtSeconds / timeConstantSeconds)
+        val next = alpha * rawSpeedKmh + (1.0 - alpha) * previousSmoothed
+        smoothedKmh = next
+        return next.toFloat()
+    }
+
+    override fun purge() {
+        smoothedKmh = null
+        lastElapsedRealtimeMillis = null
+    }
 }

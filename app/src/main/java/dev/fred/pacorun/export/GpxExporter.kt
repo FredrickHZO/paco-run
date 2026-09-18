@@ -11,9 +11,16 @@ import java.time.format.DateTimeFormatter
 // in a Files app / file manager for the user to send elsewhere -- exactly the point of this
 // export, since it's meant to leave the device for a comparison against another data source.
 object GpxExporter {
-    private val fileNameTimestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")
+    private val fileNameTimestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")
 
-    fun fileNameFor(startedAt: Instant): String = "paco-run-${fileNameTimestamp.format(startedAt.atZone(java.time.ZoneId.systemDefault()))}.gpx"
+    fun fileNameFor(startedAt: Instant): String = "paco-run-${timestampFor(startedAt)}.gpx"
+
+    // Same timestamp basis as fileNameFor(), so the two files stay associable by name (in
+    // addition to elapsedRealtimeMillis) -- session-event-logging-design.md Decision 8.
+    fun eventLogFileNameFor(startedAt: Instant): String = "paco-run-${timestampFor(startedAt)}-events.jsonl"
+
+    private fun timestampFor(startedAt: Instant) =
+        fileNameTimestamp.format(startedAt.atZone(java.time.ZoneId.systemDefault()))
 
     fun writeToDownloads(context: Context, fileName: String, contents: String): Boolean {
         val resolver = context.contentResolver

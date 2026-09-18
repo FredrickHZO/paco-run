@@ -30,6 +30,7 @@ class GpxWriterTest {
                     speedAccuracyMps = 0.2f,
                     reliable = true,
                     speedEstimatorKmh = 9.0,
+                    elapsedRealtimeMillis = 0L,
                 ),
             ),
             activityName = "Paco Run",
@@ -53,6 +54,7 @@ class GpxWriterTest {
                     speedAccuracyMps = 0.3f,
                     reliable = false,
                     speedEstimatorKmh = 11.2,
+                    elapsedRealtimeMillis = 0L,
                 ),
             ),
             activityName = "Paco Run",
@@ -65,7 +67,7 @@ class GpxWriterTest {
     }
 
     @Test
-    fun pointExtensionsCarrySpeedEstimatorKmhUnconditionally() {
+    fun pointExtensionsCarrySpeedEstimatorKmhWhenPresent() {
         val gpx = GpxWriter.build(
             listOf(
                 TrackPoint(
@@ -77,12 +79,35 @@ class GpxWriterTest {
                     speedAccuracyMps = null,
                     reliable = true,
                     speedEstimatorKmh = 7.35,
+                    elapsedRealtimeMillis = 0L,
                 ),
             ),
             activityName = "Paco Run",
         )
 
         assertTrue(gpx.contains("<pr:speedEstimatorKmh>7.35</pr:speedEstimatorKmh>"))
+    }
+
+    @Test
+    fun speedEstimatorKmhOmittedWhenNull() {
+        val gpx = GpxWriter.build(
+            listOf(
+                TrackPoint(
+                    latitude = 0.0,
+                    longitude = 0.0,
+                    timeEpochMillis = 0L,
+                    speedMps = null,
+                    horizontalAccuracyMeters = null,
+                    speedAccuracyMps = null,
+                    reliable = false,
+                    speedEstimatorKmh = null,
+                    elapsedRealtimeMillis = 0L,
+                ),
+            ),
+            activityName = "Paco Run",
+        )
+
+        assertTrue(!gpx.contains("<pr:speedEstimatorKmh>"))
     }
 
     @Test
@@ -98,6 +123,7 @@ class GpxWriterTest {
                     speedAccuracyMps = null,
                     reliable = true,
                     speedEstimatorKmh = 0.0,
+                    elapsedRealtimeMillis = 0L,
                 ),
             ),
             activityName = "Paco Run",
@@ -111,14 +137,36 @@ class GpxWriterTest {
     fun multiplePointsPreserveOrder() {
         val gpx = GpxWriter.build(
             listOf(
-                TrackPoint(0.0, 0.0, 0L, null, null, null, true, 0.0),
-                TrackPoint(0.001, 0.001, 1_000L, null, null, null, true, 0.0),
-                TrackPoint(0.002, 0.002, 2_000L, null, null, null, true, 0.0),
+                TrackPoint(0.0, 0.0, 0L, null, null, null, true, 0.0, 0L),
+                TrackPoint(0.001, 0.001, 1_000L, null, null, null, true, 0.0, 1_000L),
+                TrackPoint(0.002, 0.002, 2_000L, null, null, null, true, 0.0, 2_000L),
             ),
             activityName = "Paco Run",
         )
 
         val order = Regex("lat=\"([0-9.]+)\"").findAll(gpx).map { it.groupValues[1] }.toList()
         assertEquals(listOf("0.0", "0.001", "0.002"), order)
+    }
+
+    @Test
+    fun pointExtensionsCarryElapsedRealtimeMillisForCorrelationWithTheEventsLog() {
+        val gpx = GpxWriter.build(
+            listOf(
+                TrackPoint(
+                    latitude = 0.0,
+                    longitude = 0.0,
+                    timeEpochMillis = 0L,
+                    speedMps = null,
+                    horizontalAccuracyMeters = null,
+                    speedAccuracyMps = null,
+                    reliable = true,
+                    speedEstimatorKmh = null,
+                    elapsedRealtimeMillis = 123_456L,
+                ),
+            ),
+            activityName = "Paco Run",
+        )
+
+        assertTrue(gpx.contains("<pr:elapsedRealtimeMillis>123456</pr:elapsedRealtimeMillis>"))
     }
 }

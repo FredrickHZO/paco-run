@@ -1,8 +1,13 @@
 package dev.fred.pacorun.pace
 
+import dev.fred.pacorun.eventlog.PaceCandidateAbandonReason
+import dev.fred.pacorun.eventlog.PaceCandidateAbandonedEvent
+import dev.fred.pacorun.eventlog.PaceCandidateStartedEvent
+import dev.fred.pacorun.eventlog.PaceStateConfirmedEvent
+import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.location.LocationSample
 
-class PaceEvaluator(private var config: PaceConfig) {
+class PaceEvaluator(private var config: PaceConfig, private val onEvent: (SessionEvent) -> Unit = {}) {
     var current = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         private set
 
@@ -23,15 +28,15 @@ class PaceEvaluator(private var config: PaceConfig) {
         current = PaceResult(PaceState.ACQUIRING_GPS, null, null)
     }
 
-    fun accept(sample: LocationSample): PaceResult {
-        if (!sample.reliable) return acceptUnreliable()
+    fun accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceResult {
+        if (!sample.reliable) return acceptUnreliable(sample.elapsedRealtimeMillis)
 
         val gpsCue = if (gpsWeak && config.gpsCuesEnabled) Cue.GOOD_GPS else null
         gpsWeak = false
 
         val pace = sample.paceState()
         if (pace == confirmedPace) {
-            clearCandidate()
+            abandonCandidateIfAny(sample.elapsedRealtimeMillis, PaceCandidateAbandonReason.SNAPPED_BACK_TO_CONFIRMED)
             val paceCue = repeatedCue(pace, sample.elapsedRealtimeMillis)
             return update(
                 confirmedPace ?: PaceState.ACQUIRING_GPS,
@@ -43,8 +48,20 @@ class PaceEvaluator(private var config: PaceConfig) {
         if (pace == candidatePace) {
             candidateSamples++
         } else {
+            val supersededCandidate = candidatePace
+            if (supersededCandidate != null) {
+                onEvent(
+                    PaceCandidateAbandonedEvent(
+                        sample.elapsedRealtimeMillis,
+                        supersededCandidate,
+                        candidateSamples,
+                        PaceCandidateAbandonReason.SUPERSEDED_BY_NEW_CANDIDATE,
+                    ),
+                )
+            }
             candidatePace = pace
             candidateSamples = 1
+            onEvent(PaceCandidateStartedEvent(sample.elapsedRealtimeMillis, pace))
         }
 
         if (candidateSamples < config.confirmationSamples) {
@@ -68,15 +85,33 @@ class PaceEvaluator(private var config: PaceConfig) {
             }
             else -> null
         }
+        onEvent(
+            PaceStateConfirmedEvent(
+                elapsedRealtimeMillis = sample.elapsedRealtimeMillis,
+                fromState = previous,
+                toState = pace,
+                speedKmh = sample.speedKmh,
+                producedAudibleCue = paceCue != null,
+                rawSpeedKmh = rawSpeedKmh,
+            ),
+        )
         lastPaceCueMillis = null
         return update(pace, sample.speedKmh, selectCue(gpsCue, paceCue, sample.elapsedRealtimeMillis))
     }
 
-    private fun acceptUnreliable(): PaceResult {
-        clearCandidate()
+    private fun acceptUnreliable(elapsedRealtimeMillis: Long): PaceResult {
+        abandonCandidateIfAny(elapsedRealtimeMillis, PaceCandidateAbandonReason.GPS_BECAME_UNRELIABLE)
         val cue = if (!gpsWeak && config.gpsCuesEnabled) Cue.BAD_GPS else null
         gpsWeak = true
         return update(PaceState.GPS_WEAK, null, cue)
+    }
+
+    private fun abandonCandidateIfAny(elapsedRealtimeMillis: Long, reason: PaceCandidateAbandonReason) {
+        val abandonedState = candidatePace
+        if (abandonedState != null) {
+            onEvent(PaceCandidateAbandonedEvent(elapsedRealtimeMillis, abandonedState, candidateSamples, reason))
+        }
+        clearCandidate()
     }
 
     private fun repeatedCue(pace: PaceState, elapsedMillis: Long): Cue? {

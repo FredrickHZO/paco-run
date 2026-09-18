@@ -11,6 +11,7 @@ Questa sezione è la fonte di verità sullo stato di OGNI voce. Se una sezione p
 | Voce | Stato | Note |
 |---|---|---|
 | Refactor `MotionEngine` + 2 fix minori (doppia scrittura preferenze legacy, trick conversione `RoutineEngine.kt`) | **Completato (2026-09-13)** | `SessionDistanceEngine` estratto in `RunSessionStore.kt`, dual-review passata, `./gradlew testDebugUnitTest` (123 test) e `lintDebug` puliti, zero regressioni comportamentali. Branch `feature/motion-engine-refactor` (commit non ancora fuso su `feature/paco-run-m3e`) |
+| Fase 0.5 — `SpeedEstimator` collegato alla produzione (`KalmanSpeedEngine`) | **Completato (2026-09-13) — Kalman è ora il motore reale, non più solo diagnostico** | `DopplerSpeedEngine` resta come rete di sicurezza, rimovibile solo dopo 5 corse reali validate col motore vero attivo (decisione dell'utente, non automatica — vedi `docs/superpowers/specs/2026-09-13-speed-production-wiring-design.md` sezione 7). Conteggio corse validate: 0/5 (le 2 corse precedenti erano diagnostiche, non contano) |
 | G1 — doppia frequenza | Confermato, da verificare tecnicamente | Nessuna decisione di design, solo verifica |
 | G2 — multi-costellazione | **Già risolto, zero azione, per sempre** | Non è un task, gestito automaticamente da Android |
 | G3 — RAIM | **Scartata deliberatamente** | Superflua data la conferma di G6 (Huber), che ne è una generalizzazione |

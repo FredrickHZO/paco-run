@@ -79,6 +79,55 @@ class DistanceAccumulatorTest {
         assertEquals(0.0, accumulator.accept(fix(0.0, .00001, 2_000L), reliable = true), .001)
     }
 
+    @Test
+    fun unreliableOrInvalidFixEmitsDistanceChainBrokenEventBeforeResetting() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val accumulator = DistanceAccumulator(onEvent = events::add)
+
+        accumulator.accept(fix(0.0, 0.0, 0L), reliable = false)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.DistanceChainBrokenEvent(
+                    0L,
+                    dev.fred.pacorun.eventlog.DistanceChainBreakReason.UNRELIABLE_OR_INVALID_FIX,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun implausibleJumpEmitsDistanceChainBrokenEventBeforeResetting() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val accumulator = DistanceAccumulator(maxSpeedMetersPerSecond = 15.0, onEvent = events::add)
+
+        accumulator.accept(fix(0.0, 0.0, 0L), reliable = true)
+        // ~1113m in one second -- far beyond the 15 m/s budget, must be rejected as a jump.
+        accumulator.accept(fix(0.0, .01, 1_000L), reliable = true)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.DistanceChainBrokenEvent(
+                    1_000L,
+                    dev.fred.pacorun.eventlog.DistanceChainBreakReason.IMPLAUSIBLE_JUMP,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun reliableAcceptedFixesEmitNoEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val accumulator = DistanceAccumulator(onEvent = events::add)
+
+        accumulator.accept(fix(0.0, 0.0, 0L), reliable = true)
+        accumulator.accept(fix(0.0, .0001, 1_000L), reliable = true)
+
+        assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

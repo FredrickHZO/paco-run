@@ -443,6 +443,104 @@ class SpeedEstimatorTest {
         )
     }
 
+    @Test
+    fun unreliableFixEmitsSpeedChainBrokenEventBeforeResetting() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val estimator = SpeedEstimator(onEvent = events::add)
+
+        estimator.accept(fix(0.0, 0.0, 0L), reliable = true)
+        estimator.accept(fix(0.0, .0001, 1_000L), reliable = false)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    1_000L,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.UNRELIABLE_OR_INVALID_FIX,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun nonPositiveTimeDeltaEmitsSpeedChainBrokenEventBeforeResetting() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val estimator = SpeedEstimator(onEvent = events::add)
+
+        estimator.accept(fix(0.0, 0.0, 1_000L), reliable = true)
+        estimator.accept(fix(0.0, .0001, 1_000L), reliable = true)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    1_000L,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.NON_POSITIVE_TIME_DELTA,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun nonFiniteResultEmitsSpeedChainBrokenEventBeforeResetting() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val estimator = SpeedEstimator(onEvent = events::add)
+        val metersPerSecond = 10.0 / 3.6
+        val degreesPerSecond = metersPerSecond / 111_320.0
+        var latitude = 45.0
+        var elapsedMillis = 0L
+
+        estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        repeat(5) {
+            latitude += degreesPerSecond
+            elapsedMillis += 1_000L
+            estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, 3f), reliable = true)
+        }
+        // Same NaN-accuracy trigger as SpeedEstimatorTest's own nanAccuracyDoesNotPermanentlyPoisonFilter:
+        // a NaN horizontalAccuracyMeters poisons the Kalman update into a non-finite speed.
+        latitude += degreesPerSecond
+        elapsedMillis += 1_000L
+        estimator.accept(LocationPosition(latitude, 9.0, elapsedMillis, Float.NaN), reliable = true)
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    elapsedMillis,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.NON_FINITE_RESULT,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun normalConvergingFixesEmitNoEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val estimator = SpeedEstimator(onEvent = events::add)
+
+        estimator.accept(fix(45.4642, 9.1900, 0L), reliable = true)
+        estimator.accept(fix(45.4643, 9.1900, 1_000L), reliable = true)
+
+        assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
+    }
+
+    @Test
+    fun lastAcceptWasMeasurementIsTrueOnlyForFixesThatRanARealKalmanUpdate() {
+        val estimator = SpeedEstimator()
+
+        assertEquals(false, estimator.getLastAcceptWasMeasurement()) // before any accept()
+
+        estimator.accept(fix(45.4642, 9.1900, 0L), reliable = true)
+        assertEquals(false, estimator.getLastAcceptWasMeasurement()) // init branch, no update yet
+
+        estimator.accept(fix(45.4643, 9.1900, 1_000L), reliable = true)
+        assertEquals(true, estimator.getLastAcceptWasMeasurement())
+
+        // Non-positive dt breaks the chain without a measurement -- must not keep reporting true.
+        estimator.accept(fix(45.4644, 9.1900, 1_000L), reliable = true)
+        assertEquals(false, estimator.getLastAcceptWasMeasurement())
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

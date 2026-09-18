@@ -1,5 +1,9 @@
 package dev.fred.pacorun.service
 
+import dev.fred.pacorun.eventlog.ProcessNoiseRegime
+import dev.fred.pacorun.eventlog.SessionEvent
+import dev.fred.pacorun.eventlog.SpeedChainBreakReason
+import dev.fred.pacorun.eventlog.SpeedChainBrokenEvent
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.pow
@@ -36,6 +40,7 @@ class SpeedEstimator(
     // on both counts; 2.0 was picked as the round number in the middle of that flat region.
     private val accuracyDegradationRatio: Double = 2.0,
     private val accuracyBaselineAlpha: Double = 0.05,
+    private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     // Round-2 fix: an EMA of *unsigned* normalized innovation magnitude cannot tell a real
     // sustained acceleration apart from routine GPS noise -- a correctly-calibrated Kalman
@@ -110,14 +115,25 @@ class SpeedEstimator(
     // the burst started.
     private var accuracyBaselineMeters: Double? = null
     private var lastAccuracyGateEngaged: Boolean = false
+    // False whenever the last accept() returned without performing a real Kalman update (first
+    // fix of a chain, or any breakChain() path): in those cases lastProcessNoise /
+    // lastAccuracyGateEngaged still hold an earlier fix's values, so a caller reporting them as
+    // this fix's diagnostics would be reporting stale data.
+    private var lastAcceptWasMeasurement = false
 
     // Test/debugging accessors (internal visibility)
     internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
     internal fun getLastProcessNoise(): Double = lastProcessNoise
     internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
+    internal fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
+        if (lastProcessNoise == qHigh) ProcessNoiseRegime.Q_HIGH else ProcessNoiseRegime.Q_LOW
+    internal fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
-        if (!reliable || !position.isValid()) return breakChain()
+        if (!reliable || !position.isValid()) {
+            onEvent(SpeedChainBrokenEvent(position.elapsedRealtimeMillis, SpeedChainBreakReason.UNRELIABLE_OR_INVALID_FIX))
+            return breakChain()
+        }
 
         val lat0 = originLatitude ?: position.latitude.also { originLatitude = it }
         val lon0 = originLongitude ?: position.longitude.also { originLongitude = it }
@@ -136,11 +152,15 @@ class SpeedEstimator(
             northAxis = AxisKalman(y)
             lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
             accuracyBaselineMeters = accuracyMeters
+            lastAcceptWasMeasurement = false
             return 0.0
         }
 
         val dtSeconds = (position.elapsedRealtimeMillis - previousElapsed) / 1_000.0
-        if (dtSeconds <= 0.0) return breakChain()
+        if (dtSeconds <= 0.0) {
+            onEvent(SpeedChainBrokenEvent(position.elapsedRealtimeMillis, SpeedChainBreakReason.NON_POSITIVE_TIME_DELTA))
+            return breakChain()
+        }
 
         // Accuracy gate (Task 1): a fix whose accuracy has degraded well past the recent
         // baseline gets qLow forced regardless of the innovation-EMA decision below, and its
@@ -159,6 +179,7 @@ class SpeedEstimator(
             qLow
         }
         lastProcessNoise = processNoise
+        lastAcceptWasMeasurement = true
         east.predict(dtSeconds, processNoise)
         north.predict(dtSeconds, processNoise)
 
@@ -175,7 +196,9 @@ class SpeedEstimator(
 
         lastElapsedRealtimeMillis = position.elapsedRealtimeMillis
         val speed = hypot(east.velocity, north.velocity) * METERS_PER_SECOND_TO_KMH
-        return if (speed.isFinite()) speed else breakChain()
+        if (speed.isFinite()) return speed
+        onEvent(SpeedChainBrokenEvent(position.elapsedRealtimeMillis, SpeedChainBreakReason.NON_FINITE_RESULT))
+        return breakChain()
     }
 
     fun breakChain(): Double {
@@ -185,6 +208,7 @@ class SpeedEstimator(
         eastInnovationEma = 0.0
         northInnovationEma = 0.0
         accuracyBaselineMeters = null
+        lastAcceptWasMeasurement = false
         return 0.0
     }
 
