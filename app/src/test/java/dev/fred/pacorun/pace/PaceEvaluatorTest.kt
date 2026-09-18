@@ -203,7 +203,9 @@ class PaceEvaluatorTest {
         assertEquals(
             listOf(
                 dev.fred.pacorun.eventlog.PaceCandidateStartedEvent(0L, PaceState.TOO_FAST),
-                dev.fred.pacorun.eventlog.PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, true),
+                // rawSpeedKmh defaults to sample.speedKmh when the caller (this test) doesn't pass
+                // it explicitly -- both fields equal 8.8f here, same as pre-P2 behavior.
+                dev.fred.pacorun.eventlog.PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, true, rawSpeedKmh = 8.8f),
             ),
             events,
         )
@@ -224,6 +226,24 @@ class PaceEvaluatorTest {
         assertEquals(PaceState.TOO_FAST, confirmed.fromState)
         assertEquals(PaceState.GOOD, confirmed.toState)
         assertEquals(true, confirmed.producedAudibleCue)
+        assertEquals(8f, confirmed.rawSpeedKmh)
+    }
+
+    @Test
+    fun rawSpeedKmhParameterFlowsToEventPayloadWithoutAffectingDecisionLogic() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val evaluator = PaceEvaluator(config, onEvent = events::add)
+
+        // sample.speedKmh is the (here: stand-in "smoothed") value PaceEvaluator decides on --
+        // 8.7/8.8, both TOO_FAST. rawSpeedKmh is deliberately a different reading (9.1/9.4) to
+        // prove decision logic ignores it entirely, only the event payload sees it.
+        evaluator.accept(sample(8.7f, 0L), rawSpeedKmh = 9.1f)
+        val result = evaluator.accept(sample(8.8f, 1_000L), rawSpeedKmh = 9.4f)
+
+        assertEquals(PaceState.TOO_FAST, result.state) // decided from sample.speedKmh=8.8, not rawSpeedKmh
+        val confirmed = events.filterIsInstance<dev.fred.pacorun.eventlog.PaceStateConfirmedEvent>().single()
+        assertEquals(8.8f, confirmed.speedKmh) // decision input, unchanged behavior
+        assertEquals(9.4f, confirmed.rawSpeedKmh) // the raw value, threaded through for the payload only
     }
 
     @Test

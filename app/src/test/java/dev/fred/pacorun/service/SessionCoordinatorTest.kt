@@ -653,7 +653,7 @@ class SessionCoordinatorTest {
             events += "reset"
         }
 
-        override fun accept(sample: LocationSample): PaceResult {
+        override fun accept(sample: LocationSample, rawSpeedKmh: Float?): PaceResult {
             events += "pace"
             samples += sample
             return result

@@ -198,7 +198,7 @@ interface SessionRoutineEngine {
 
 interface SessionPaceEvaluator {
     fun updateConfig(config: PaceConfig)
-    fun accept(sample: LocationSample): PaceResult
+    fun accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceResult
 }
 
 interface SessionSpeedEngine {
@@ -434,7 +434,9 @@ class RoutineEngineAdapter(private val engine: RoutineEngine) : SessionRoutineEn
 
 class PaceEvaluatorAdapter(private val evaluator: PaceEvaluator) : SessionPaceEvaluator {
     override fun updateConfig(config: PaceConfig) = evaluator.updateConfig(config)
-    override fun accept(sample: LocationSample) = evaluator.accept(sample)
+    // Kotlin forbids default parameter values on an override -- the interface's default already
+    // covers callers that omit the argument; this override just forwards whatever it receives.
+    override fun accept(sample: LocationSample, rawSpeedKmh: Float?) = evaluator.accept(sample, rawSpeedKmh)
 }
 
 class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstimator()) : SessionSpeedEngine {

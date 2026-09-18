@@ -28,7 +28,7 @@ class PaceEvaluator(private var config: PaceConfig, private val onEvent: (Sessio
         current = PaceResult(PaceState.ACQUIRING_GPS, null, null)
     }
 
-    fun accept(sample: LocationSample): PaceResult {
+    fun accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceResult {
         if (!sample.reliable) return acceptUnreliable(sample.elapsedRealtimeMillis)
 
         val gpsCue = if (gpsWeak && config.gpsCuesEnabled) Cue.GOOD_GPS else null
@@ -92,6 +92,7 @@ class PaceEvaluator(private var config: PaceConfig, private val onEvent: (Sessio
                 toState = pace,
                 speedKmh = sample.speedKmh,
                 producedAudibleCue = paceCue != null,
+                rawSpeedKmh = rawSpeedKmh,
             ),
         )
         lastPaceCueMillis = null
