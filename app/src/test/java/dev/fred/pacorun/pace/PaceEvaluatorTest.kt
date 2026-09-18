@@ -3,6 +3,7 @@ package dev.fred.pacorun.pace
 import dev.fred.pacorun.location.LocationSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PaceEvaluatorTest {
@@ -340,6 +341,96 @@ class PaceEvaluatorTest {
         evaluator.updateConfig(config) // phase-change reset -- already covered by RoutinePhaseChangedEvent, not an abandon
 
         assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
+    }
+
+    @Test
+    fun emaSmoothingSubstantiallyReducesDirectFlipsOnTheNarrowBandWorstCaseOscillation() {
+        val config = PaceConfig(minKmh = 7.5f, maxKmh = 8.2f, confirmationSamples = 2, repeatMillis = 5_000L, gpsCuesEnabled = false)
+        val trajectory = narrowBandOscillation(periodSeconds = 7.0, sampleCount = 90)
+
+        val baselineFlips = confirmedDirectFlips(PaceEvaluator(config), trajectory, smoother = null)
+        val smoothedFlips = confirmedDirectFlips(PaceEvaluator(config), trajectory, smoother = dev.fred.pacorun.service.EmaPaceSmoother(timeConstantSeconds = 6.0))
+
+        // The baseline must actually reproduce repeated flapping on these parameters, or the
+        // synthetic trajectory isn't representative of the real worst case (design doc Decision
+        // 8.1's own instruction: if it doesn't flap, revise the parameters before drawing any
+        // conclusion about tau). If this fails, adjust periodSeconds within the design doc's
+        // specified 6-8s range before touching anything else.
+        assertTrue("baseline should flap repeatedly on a 0.7 km/h band, got $baselineFlips", baselineFlips >= 5)
+        // EMA at tau=6.0s must cut that flapping substantially, not just marginally.
+        assertTrue(
+            "smoothing should cut direct flips by at least half, got $baselineFlips -> $smoothedFlips",
+            smoothedFlips <= baselineFlips / 2,
+        )
+    }
+
+    @Test
+    fun emaSmoothingConfirmsASustainedEffortChangeWithinABoundedLagBeyondTheExistingDebounce() {
+        // Not an oscillation -- a genuine, sustained effort change: TOO_SLOW held steady for 20s,
+        // then a real step up into the GOOD band, held steady. Decision 8.1's second criterion:
+        // smoothing must not turn responsiveness into practical unresponsiveness.
+        val config = PaceConfig(minKmh = 7.5f, maxKmh = 8.2f, confirmationSamples = 2, repeatMillis = 5_000L, gpsCuesEnabled = false)
+        val evaluator = PaceEvaluator(config)
+        val smoother = dev.fred.pacorun.service.EmaPaceSmoother(timeConstantSeconds = 6.0)
+
+        var elapsedMillis = 0L
+        repeat(20) {
+            val decisionSpeed = smoother.accept(7.0f, elapsedMillis)
+            evaluator.accept(sample(decisionSpeed, elapsedMillis), rawSpeedKmh = 7.0f)
+            elapsedMillis += 1_000L
+        }
+        val stepElapsedMillis = elapsedMillis
+        var confirmedAtMillis: Long? = null
+        repeat(30) {
+            val decisionSpeed = smoother.accept(7.85f, elapsedMillis)
+            val result = evaluator.accept(sample(decisionSpeed, elapsedMillis), rawSpeedKmh = 7.85f)
+            if (confirmedAtMillis == null && result.state == PaceState.GOOD) confirmedAtMillis = elapsedMillis
+            elapsedMillis += 1_000L
+        }
+
+        val lagMillis = requireNotNull(confirmedAtMillis) { "GOOD was never confirmed after the step" } - stepElapsedMillis
+        // Explicit bound (a plan-level refinement, the design doc left the exact number
+        // unspecified): comfortably above the theoretical ~7s (5.3s for the EMA to re-enter the
+        // band + up to 2s for the confirmationSamples debounce) while still ruling out "tens of
+        // seconds" unresponsiveness.
+        assertTrue("lag should stay bounded, was ${lagMillis}ms", lagMillis <= 15_000L)
+    }
+
+    /**
+     * Reproduces the 2026-09-13 narrow-band run's approximate shape (see design doc Decision
+     * 8.1): 7.19-9.38 km/h peak-to-peak oscillation (the one concrete per-second extract that
+     * run's own validation doc reports), around a [periodSeconds] cycle, sampled at 1Hz -- not a
+     * replay of real per-tick data (none exists for that run; P1 didn't exist yet).
+     */
+    private fun narrowBandOscillation(periodSeconds: Double, sampleCount: Int): List<Pair<Float, Long>> {
+        val center = 8.285 // midpoint of the 7.19-9.38 km/h peak-to-peak extract
+        val amplitude = 1.095 // (9.38 - 7.19) / 2
+        return (0 until sampleCount).map { i ->
+            val tSeconds = i.toDouble()
+            val speedKmh = center + amplitude * kotlin.math.sin(2.0 * Math.PI * tSeconds / periodSeconds)
+            speedKmh.toFloat() to (tSeconds * 1_000.0).toLong()
+        }
+    }
+
+    private fun confirmedDirectFlips(
+        evaluator: PaceEvaluator,
+        trajectory: List<Pair<Float, Long>>,
+        smoother: dev.fred.pacorun.service.SessionPaceSmoothingEngine?,
+    ): Int {
+        var previousState: PaceState? = null
+        var directFlips = 0
+        trajectory.forEach { (rawSpeedKmh, elapsedMillis) ->
+            val decisionSpeed = smoother?.accept(rawSpeedKmh, elapsedMillis) ?: rawSpeedKmh
+            val state = evaluator.accept(sample(decisionSpeed, elapsedMillis), rawSpeedKmh).state
+            if (previousState != null && previousState != state &&
+                (previousState == PaceState.TOO_SLOW && state == PaceState.TOO_FAST ||
+                    previousState == PaceState.TOO_FAST && state == PaceState.TOO_SLOW)
+            ) {
+                directFlips++
+            }
+            previousState = state
+        }
+        return directFlips
     }
 
     private fun evaluatorAlreadyFast() = PaceEvaluator(config).also {
