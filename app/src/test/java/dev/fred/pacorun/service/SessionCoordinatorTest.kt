@@ -424,7 +424,8 @@ class SessionCoordinatorTest {
         var time = 0L
 
         // Alcuni fix reali a ritmo costante, per lasciare al Kalman il tempo di convergere.
-        repeat(15) {
+        // 40s: serve tempo anche alla EmaPaceSmoother reale (tau=6s) a valle del Kalman, non solo al Kalman stesso.
+        repeat(40) {
             longitude += degreesPerSecondAt8Kmh
             time += 1_000L
             coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
@@ -621,9 +622,127 @@ class SessionCoordinatorTest {
         )
     }
 
+    @Test
+    fun profileChangePurgesThePaceSmoother() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = true)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun earlyWalkInTenCuePurgesThePaceSmootherAheadOfTheRealPhaseChange() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false, cues = listOf(RoutineCue.WALK_IN_TEN))
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun staleGpsRecoveryPurgesThePaceSmootherWhenTheSpeedChainBreaks() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        // DEFAULT_MAX_AGE_MILLIS is 3000ms -- the staleness gate first opens on this tick, same
+        // setup as sustainedUnreliableStreamEmitsSpeedChainBrokenEventOnlyOnceAcrossTheWholeOutage.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun paceEvaluatorReceivesTheSmoothedSpeedAsInputAndTheRawSpeedAsThePayloadParameter() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        // Doubles every raw reading, so smoothed and raw are unmistakably different values.
+        val smoother = FakePaceSmoother(transform = { it * 2f })
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(listOf(8f), smoother.acceptedRawSpeeds) // the smoother itself always sees the raw reading
+        assertEquals(16f, pace.samples.single().speedKmh) // PaceEvaluator decides on the SMOOTHED value
+        assertEquals(8f, pace.rawSpeeds.single()) // ...but the raw value still threads through as the payload param
+    }
+
+    @Test
+    fun smoothingNeverLeaksIntoTheDisplayedRoutineInputOrLoggedRawSpeedFields() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.TOO_FAST, 8f, Cue.TOO_FAST))
+        val published = mutableListOf<RunSessionState>()
+        // Doubles every raw reading -- if smoothing leaked into any of the three fields below,
+        // they'd read 16f instead of the raw 8f and this test would catch it immediately.
+        val smoother = FakePaceSmoother(transform = { it * 2f })
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        val state = published.single() as RunSessionState.Running
+        assertEquals(8f, state.speedKmh) // RunSessionState.speedKmh: raw, per Decision 6
+        assertEquals(8f, routine.lastInput.currentReliableSpeedKmh) // RoutineInput.currentReliableSpeedKmh: raw
+        val cueEvent = events.filterIsInstance<dev.fred.pacorun.eventlog.AudioCueEmittedEvent>().first()
+        assertEquals(8f, cueEvent.speedKmh) // AudioCueEmittedEvent.speedKmh: raw
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,
+        private val cues: List<RoutineCue> = listOf(RoutineCue.ROUTINE_START),
     ) : SessionRoutineEngine {
         lateinit var lastInput: RoutineInput
         val inputs = mutableListOf<RoutineInput>()
@@ -638,7 +757,7 @@ class SessionCoordinatorTest {
                 intervalRemainingMillis = 4_000L,
                 totalDistanceMeters = 3.0,
                 routineDistanceMeters = 2.0,
-                cues = listOf(RoutineCue.ROUTINE_START),
+                cues = cues,
                 profileChanged = profileChanged,
             )
         }
@@ -649,6 +768,7 @@ class SessionCoordinatorTest {
         private val result: PaceResult,
     ) : SessionPaceEvaluator {
         val samples = mutableListOf<LocationSample>()
+        val rawSpeeds = mutableListOf<Float?>()
         override fun updateConfig(config: PaceConfig) {
             events += "reset"
         }
@@ -656,7 +776,23 @@ class SessionCoordinatorTest {
         override fun accept(sample: LocationSample, rawSpeedKmh: Float?): PaceResult {
             events += "pace"
             samples += sample
+            rawSpeeds += rawSpeedKmh
             return result
+        }
+    }
+
+    private class FakePaceSmoother(private val transform: (Float) -> Float = { it }) : SessionPaceSmoothingEngine {
+        var purgeCalls = 0
+            private set
+        val acceptedRawSpeeds = mutableListOf<Float>()
+
+        override fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float {
+            acceptedRawSpeeds += rawSpeedKmh
+            return transform(rawSpeedKmh)
+        }
+
+        override fun purge() {
+            purgeCalls++
         }
     }
 

@@ -13,6 +13,7 @@ import dev.fred.pacorun.pace.PaceConfig
 import dev.fred.pacorun.pace.PaceEvaluator
 import dev.fred.pacorun.pace.PaceResult
 import dev.fred.pacorun.pace.PaceState
+import dev.fred.pacorun.routine.RoutineCue
 import dev.fred.pacorun.routine.RoutineEngine
 import dev.fred.pacorun.routine.RoutineInput
 import dev.fred.pacorun.routine.RoutinePhase
@@ -230,6 +231,7 @@ class SessionCoordinator(
     private val startedAtElapsedMillis: Long = 0L,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
     private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
+    private val paceSmoother: SessionPaceSmoothingEngine = EmaPaceSmoother(),
     private val onSpeedComputed: (Double?) -> Unit = {},
     private val onEvent: (SessionEvent) -> Unit = {},
 ) {
@@ -305,6 +307,7 @@ class SessionCoordinator(
                 speedChainBrokenReportedForOutage = true
             }
             speedEngine.breakChain()
+            paceSmoother.purge()
         }
         val distanceDelta = if (actualReliable) {
             distanceEngine.accept(requireNotNull(position), reliable = true)
@@ -319,6 +322,13 @@ class SessionCoordinator(
                 gpsReliable = gpsReliable,
             ),
         )
+        // The RUN/WALK warning fires ~10s before the real transition, with no advance notice for
+        // the CONSTANT_BEFORE->RUN warmup boundary -- purging here is speculative (spec Decision
+        // 4.2: unverified on real data, a one-line change to remove if the next real run disproves
+        // it), separate from the reactive 4.1 purge below.
+        if (routine.cues.any { it == RoutineCue.WALK_IN_TEN || it == RoutineCue.RUN_IN_TEN }) {
+            paceSmoother.purge()
+        }
         if (routine.profileChanged) {
             paceEvaluator.updateConfig(
                 PaceConfig(
@@ -329,14 +339,29 @@ class SessionCoordinator(
                     gpsCuesEnabled = preferences.gpsCuesEnabled,
                 ),
             )
+            paceSmoother.purge()
             latestPace = PaceResult(PaceState.ACQUIRING_GPS, null, null)
         }
         if (routine.profileChanged && wasOutage) {
             latestPace = paceEvaluator.accept(LocationSample(0f, null, false, elapsedRealtimeMillis)).copy(cue = null)
         }
+        // All three purge triggers above run before this point in the same tick, so a fresh raw
+        // sample arriving on a purge tick is always the first post-purge sample -- returned raw,
+        // per EmaPaceSmoother's own contract -- never fused into stale pre-purge memory first.
+        val smoothedSpeedKmh = if (actualReliable) {
+            paceSmoother.accept(paceSample.speedKmh, elapsedRealtimeMillis)
+        } else {
+            paceSample.speedKmh
+        }
         val pace = when {
-            sample != null -> paceEvaluator.accept(paceSample)
-            signalGpsOutage && enteredOutage -> paceEvaluator.accept(paceSample)
+            sample != null -> paceEvaluator.accept(
+                paceSample.copy(speedKmh = smoothedSpeedKmh),
+                rawSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+            )
+            signalGpsOutage && enteredOutage -> paceEvaluator.accept(
+                paceSample.copy(speedKmh = smoothedSpeedKmh),
+                rawSpeedKmh = paceSample.speedKmh.takeIf { gpsReliable },
+            )
             else -> latestPace
         }
         latestPace = pace
@@ -391,6 +416,7 @@ class PendingSessionCoordinator(
     private val publish: (RunSessionState) -> Unit,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
     private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),
+    private val paceSmoother: SessionPaceSmoothingEngine = EmaPaceSmoother(),
     private val onSpeedComputed: (Double?) -> Unit = {},
     private val onEvent: (SessionEvent) -> Unit = {},
 ) {
@@ -423,6 +449,7 @@ class PendingSessionCoordinator(
             startedAtElapsedMillis = startedAtElapsedMillis,
             distanceEngine = distanceEngine,
             speedEngine = speedEngine,
+            paceSmoother = paceSmoother,
             onSpeedComputed = onSpeedComputed,
             onEvent = onEvent,
         ).also { activeCoordinator = it }
