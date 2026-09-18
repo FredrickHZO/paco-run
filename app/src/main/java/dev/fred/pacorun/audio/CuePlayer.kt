@@ -1,6 +1,8 @@
 package dev.fred.pacorun.audio
 
 import android.content.Context
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -54,9 +56,54 @@ class AudioCueQueue {
     fun takeNext(): QueuedAudioCue? = cues.removeFirstOrNull()
 
     fun clear() = cues.clear()
+
+    fun size(): Int = cues.size
 }
 
-class CuePlayer(context: Context) {
+// media3 1.9.3's automatic `handleAudioFocus` only supports USAGE_MEDIA/USAGE_GAME -- for
+// USAGE_ASSISTANCE_NAVIGATION_GUIDANCE (the right usage for spoken cues) it silently fails
+// its own precondition check internally and never actually calls AudioManager, so other apps'
+// volume was never ducked. Focus is requested by hand here instead.
+interface AudioDucking {
+    /** Returns true if focus was granted. False means the cue must not play unprotected. */
+    fun requestDucking(onFocusLost: () -> Unit): Boolean
+    fun releaseDucking()
+}
+
+// A full focus loss (AUDIOFOCUS_LOSS/_TRANSIENT, e.g. an incoming call) means someone else needs
+// the speaker now -- CuePlayer stops and drops whatever's queued rather than pausing to resume
+// mid-sentence later, or playing a stale cue once focus returns. See docs/handoff-2026-09-08.md.
+class SystemAudioDucking(context: Context) : AudioDucking {
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private var onFocusLost: (() -> Unit)? = null
+    private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(
+            android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build(),
+        )
+        .setOnAudioFocusChangeListener { focusChange ->
+            if (focusChange == AudioManager.AUDIOFOCUS_LOSS ||
+                focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+            ) {
+                onFocusLost?.invoke()
+            }
+        }
+        .build()
+
+    override fun requestDucking(onFocusLost: () -> Unit): Boolean {
+        this.onFocusLost = onFocusLost
+        return audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    override fun releaseDucking() {
+        onFocusLost = null
+        audioManager.abandonAudioFocusRequest(focusRequest)
+    }
+}
+
+class CuePlayer(context: Context, private val ducking: AudioDucking = SystemAudioDucking(context)) {
     init {
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "CuePlayer must be created on the main thread"
@@ -71,7 +118,7 @@ class CuePlayer(context: Context) {
                 .setUsage(C.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                 .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                 .build(),
-            true,
+            false,
         )
         .build()
     private val playerHandler = Handler(player.applicationLooper)
@@ -81,7 +128,9 @@ class CuePlayer(context: Context) {
     init {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) playNext()
+                // `playing` guards against a stale STATE_ENDED delivery that lands after
+                // stopAndDropOnFocusLoss() already stopped playback and cleared the queue.
+                if (playbackState == Player.STATE_ENDED && playing) playNext()
             }
         })
     }
@@ -94,15 +143,37 @@ class CuePlayer(context: Context) {
 
     fun close() = onPlayerLooper(::closeInternal)
 
+    @androidx.annotation.VisibleForTesting
+    internal fun queueSizeForTest(): Int = queue.size()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun playbackStateForTest(): Int = player.playbackState
+
     private fun enqueueInternal(cues: List<AudioCue>, volume: Float) {
         if (closed) return
         queue.enqueue(cues, volume)
-        if (!playing) playNext()
+        if (!playing) {
+            // Always post rather than calling straight through: onFocusLost fires from inside
+            // AudioManager's own OnAudioFocusChangeListener callback, and stopAndDropOnFocusLoss
+            // calls back into AudioManager (abandonAudioFocusRequest) -- posting avoids doing
+            // that reentrantly on the same call stack, matching media3's own AudioFocusManager.
+            val granted = ducking.requestDucking(onFocusLost = { playerHandler.post(::stopAndDropOnFocusLoss) })
+            if (granted) playNext() else queue.clear()
+        }
+    }
+
+    private fun stopAndDropOnFocusLoss() {
+        if (closed || !playing) return
+        player.stop()
+        queue.clear()
+        playing = false
+        ducking.releaseDucking()
     }
 
     private fun closeInternal() {
         if (closed) return
         closed = true
+        if (playing) ducking.releaseDucking()
         queue.clear()
         player.release()
     }
@@ -116,6 +187,7 @@ class CuePlayer(context: Context) {
         val next = queue.takeNext()
         if (next == null) {
             playing = false
+            ducking.releaseDucking()
             return
         }
         playing = true

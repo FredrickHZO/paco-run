@@ -1,10 +1,12 @@
 package dev.fred.pacorun.routine
 
+import dev.fred.pacorun.eventlog.RoutinePhaseChangedEvent
+import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.settings.RoutineMode
 import dev.fred.pacorun.settings.RunPreferences
 import dev.fred.pacorun.settings.SpeedRange
 
-class RoutineEngine(private val preferences: RunPreferences) {
+class RoutineEngine(private val preferences: RunPreferences, private val onEvent: (SessionEvent) -> Unit = {}) {
     private var phase = if (preferences.mode == RoutineMode.CONSTANT) RoutinePhase.CONSTANT else RoutinePhase.CONSTANT_BEFORE
     private var initialized = false
     private var intervalStartedAtMillis = 0L
@@ -47,7 +49,7 @@ class RoutineEngine(private val preferences: RunPreferences) {
 
         if (phase == RoutinePhase.RUN || phase == RoutinePhase.WALK) {
             if (!preferences.routineUnlimited && routineDistanceMeters >= kmToMeters(preferences.routineKm)) {
-                finishRoutine(reliableSpeed(input), cues)
+                finishRoutine(input.elapsedRealtimeMillis, reliableSpeed(input), cues)
                 profileChanged = true
             } else {
                 val transitions = advanceTo(input.elapsedRealtimeMillis)
@@ -67,15 +69,19 @@ class RoutineEngine(private val preferences: RunPreferences) {
     }
 
     private fun startRun(now: Long, speed: Float?, cues: MutableList<RoutineCue>) {
+        val fromPhase = phase
         phase = RoutinePhase.RUN
+        onEvent(RoutinePhaseChangedEvent(now, fromPhase, phase, totalDistanceMeters))
         intervalStartedAtMillis = now
         resetIntervalCues()
         cues += phaseCue()
         directionCue(speed, activeRange())?.let(cues::add)
     }
 
-    private fun finishRoutine(speed: Float?, cues: MutableList<RoutineCue>) {
+    private fun finishRoutine(now: Long, speed: Float?, cues: MutableList<RoutineCue>) {
+        val fromPhase = phase
         phase = RoutinePhase.CONSTANT_AFTER
+        onEvent(RoutinePhaseChangedEvent(now, fromPhase, phase, totalDistanceMeters))
         cues.clear()
         cues += RoutineCue.ROUTINE_END
         directionCue(speed, activeRange())?.let(cues::add)
@@ -87,7 +93,9 @@ class RoutineEngine(private val preferences: RunPreferences) {
 
         var remaining = elapsed - durationMillis()
         intervalStartedAtMillis += durationMillis()
+        val firstFromPhase = phase
         phase = nextPhase()
+        onEvent(RoutinePhaseChangedEvent(now, firstFromPhase, phase, totalDistanceMeters))
         val runMillis = preferences.runSeconds * 1_000L
         val walkMillis = preferences.walkSeconds * 1_000L
         val cycleMillis = runMillis + walkMillis
@@ -97,11 +105,15 @@ class RoutineEngine(private val preferences: RunPreferences) {
 
         var transitions = if (fullCycles > 0L) 2 else 1
         if (phase == RoutinePhase.RUN && remaining >= runMillis) {
+            val secondFromPhase = phase
             phase = RoutinePhase.WALK
+            onEvent(RoutinePhaseChangedEvent(now, secondFromPhase, phase, totalDistanceMeters))
             intervalStartedAtMillis += runMillis
             transitions = 2
         } else if (phase == RoutinePhase.WALK && remaining >= walkMillis) {
+            val secondFromPhase = phase
             phase = RoutinePhase.RUN
+            onEvent(RoutinePhaseChangedEvent(now, secondFromPhase, phase, totalDistanceMeters))
             intervalStartedAtMillis += walkMillis
             transitions = 2
         }
@@ -174,6 +186,10 @@ class RoutineEngine(private val preferences: RunPreferences) {
         lastTimingCheckMillis = intervalStartedAtMillis - 1L
     }
 
+    // Via String round-trip, not a direct Float->Double cast: converting directly
+    // (e.g. 7.4f.toDouble()) carries the binary imprecision of the original Float
+    // (~7.400000095...) into the meter value. The String round-trip restarts from the
+    // clean decimal representation the Float displays, avoiding threshold misalignment.
     private fun kmToMeters(km: Float) = km.toString().toDouble() * 1_000.0
 
     private fun result(cues: List<RoutineCue>, profileChanged: Boolean) = RoutineResult(

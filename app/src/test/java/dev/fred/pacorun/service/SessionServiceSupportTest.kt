@@ -36,5 +36,6 @@ class SessionServiceSupportTest {
         intervalRemainingMillis = 60_000L,
         totalDistanceMeters = 0.0,
         routineDistanceMeters = 0.0,
+        activeRange = dev.fred.pacorun.settings.SpeedRange(7f, 8f),
     )
 }

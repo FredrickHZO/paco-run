@@ -1,0 +1,37 @@
+package dev.fred.pacorun.ui
+
+object UiTags {
+    const val start = "start"
+    const val editRoutine = "edit-routine"
+
+    const val constantMinSpeed = "constant-min-speed"
+    const val constantMaxSpeed = "constant-max-speed"
+    const val constantRangeError = "constant-range-error"
+    const val initialDistance = "initial-distance"
+    const val initialDistanceError = "initial-distance-error"
+    const val runDuration = "run-duration"
+    const val runDurationError = "run-duration-error"
+    const val runMinSpeed = "run-min-speed"
+    const val runMaxSpeed = "run-max-speed"
+    const val runRangeError = "run-range-error"
+    const val walkDuration = "walk-duration"
+    const val walkDurationError = "walk-duration-error"
+    const val walkMinSpeed = "walk-min-speed"
+    const val walkMaxSpeed = "walk-max-speed"
+    const val walkRangeError = "walk-range-error"
+    const val routineUnlimited = "routine-unlimited"
+    const val routineDistance = "routine-distance"
+    const val routineDistanceError = "routine-distance-error"
+    const val gpsCues = "gps-cues"
+    const val cueVolume = "cue-volume"
+    const val saveRoutine = "save-routine"
+
+    const val activePhase = "active-phase"
+    const val activeSpeed = "active-speed"
+    const val activeRemaining = "active-remaining"
+    const val activeTotalDistance = "active-total-distance"
+    const val activeRoutineDistance = "active-routine-distance"
+    const val activeGps = "active-gps"
+    const val stop = "stop"
+    const val gpsProgress = "gps-progress"
+}

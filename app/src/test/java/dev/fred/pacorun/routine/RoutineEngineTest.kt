@@ -248,6 +248,74 @@ class RoutineEngineTest {
         assertEquals(listOf(RoutineCue.WALK_ROUTINE), result.cues)
     }
 
+    @Test
+    fun zeroWarmupPhaseChangeEmitsOneRoutinePhaseChangedEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val engine = RoutineEngine(preferences(), onEvent = events::add)
+
+        engine.accept(input(time = 0L, distance = 5.0))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.RoutinePhaseChangedEvent(
+                    0L,
+                    RoutinePhase.CONSTANT_BEFORE,
+                    RoutinePhase.RUN,
+                    5.0,
+                ),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun finishingTheRoutineEmitsRoutinePhaseChangedEventToConstantAfter() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val engine = RoutineEngine(preferences(unlimited = false, routineKm = .001f), onEvent = events::add)
+
+        engine.accept(input(time = 0L)) // starts RUN
+        events.clear()
+        engine.accept(input(time = 1_000L, distance = 2.0)) // routineDistanceMeters (2.0) crosses the 1.0m threshold
+
+        assertEquals(
+            listOf(dev.fred.pacorun.eventlog.RoutinePhaseChangedEvent(1_000L, RoutinePhase.RUN, RoutinePhase.CONSTANT_AFTER, 2.0)),
+            events,
+        )
+    }
+
+    @Test
+    fun aDelayedTickThatSkipsAFullCycleEmitsTwoSeparateRoutinePhaseChangedEvents() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val engine = RoutineEngine(preferences(runSeconds = 5, walkSeconds = 5), onEvent = events::add)
+
+        engine.accept(input(time = 0L)) // starts RUN immediately (warmupKm = 0)
+        events.clear()
+        // elapsed=12000: durationMillis(RUN)=5000 -> remaining=7000; 1st reassignment RUN->WALK;
+        // fullCycles=7000/10000=0, remaining stays 7000 >= walkMillis(5000) -> 2nd reassignment WALK->RUN.
+        // Hand-verified: this is exactly the "RUN->WALK->RUN before the next observation" case
+        // Decision 6 describes -- both real `phase = ...` reassignments must produce their own event.
+        val result = engine.accept(input(time = 12_000L))
+
+        assertEquals(RoutinePhase.RUN, result.phase)
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.RoutinePhaseChangedEvent(12_000L, RoutinePhase.RUN, RoutinePhase.WALK, 0.0),
+                dev.fred.pacorun.eventlog.RoutinePhaseChangedEvent(12_000L, RoutinePhase.WALK, RoutinePhase.RUN, 0.0),
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun constantModeNeverEmitsAnEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val engine = RoutineEngine(RunPreferences(), onEvent = events::add)
+
+        engine.accept(input(time = 0L, distance = 100.0))
+
+        assertEquals(emptyList<dev.fred.pacorun.eventlog.SessionEvent>(), events)
+    }
+
     private fun preferences(
         warmupKm: Float = 0f,
         runSeconds: Int = 20,

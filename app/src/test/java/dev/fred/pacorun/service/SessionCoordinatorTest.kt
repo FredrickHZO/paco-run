@@ -31,6 +31,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(
@@ -42,11 +43,14 @@ class SessionCoordinatorTest {
         coordinator.tick(
             elapsedRealtimeMillis = 1_000L,
             sample = reliableSample(9f, 1_000L),
-            position = LocationPosition(0.0, .00001, 1_000L),
+            // 0.0001 degrees longitude at the equator (~11.13m): a real movement, comfortably
+            // clear of DistanceAccumulator's jitter floor (unlike the previous 0.00001/1.11m,
+            // which the jitter filter now correctly suppresses as noise).
+            position = LocationPosition(0.0, .0001, 1_000L),
         )
 
         assertEquals(listOf("routine", "reset", "pace", "cues:ROUTINE_START, TOO_FAST"), events)
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         val state = published.last() as RunSessionState.Running
         assertEquals(RoutinePhase.RUN, state.phase)
         assertEquals(9f, state.speedKmh)
@@ -67,6 +71,7 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .00001, 1_000L))
@@ -91,14 +96,15 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, sample = null, position = null)
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
         coordinator.tick(1_000L, sample = null, position = null)
-        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .00001, 1_000L))
+        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .0001, 1_000L))
 
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         assertEquals(4, routine.inputs.size)
         assertEquals(2, pace.samples.size)
         assertTrue(pace.samples[0].reliable)
@@ -116,6 +122,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -135,14 +142,15 @@ class SessionCoordinatorTest {
             paceEvaluator = pace,
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
         coordinator.advanceTimer(1_000L, signalGpsOutage = false)
-        coordinator.tick(1_900L, reliableSample(8f, 1_900L), LocationPosition(0.0, .00001, 1_900L))
+        coordinator.tick(1_900L, reliableSample(8f, 1_900L), LocationPosition(0.0, .0001, 1_900L))
 
         assertEquals(listOf(0L, 1_000L, 1_000L), routine.inputs.map { it.elapsedRealtimeMillis })
-        assertEquals(1.11, routine.lastInput.reliableDistanceDeltaMeters, .02)
+        assertEquals(11.13, routine.lastInput.reliableDistanceDeltaMeters, .02)
         assertEquals(2, pace.samples.size)
         assertEquals(1_900L, pace.samples.last().elapsedRealtimeMillis)
     }
@@ -158,6 +166,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -179,6 +188,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
             onCues = { _, _ -> },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -207,6 +217,7 @@ class SessionCoordinatorTest {
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 11f, null)),
             onCues = { values, _ -> cues += values },
             publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.tick(0L, reliableSample(11f, 0L), LocationPosition(0.0, 0.0, 0L))
@@ -217,6 +228,7 @@ class SessionCoordinatorTest {
         val state = published.last() as RunSessionState.Running
         assertTrue(state.gpsReliable)
         assertEquals(11f, state.speedKmh)
+        assertEquals(SpeedRange(4f, 5f), state.activeRange)
     }
 
     @Test
@@ -230,6 +242,7 @@ class SessionCoordinatorTest {
             ),
             onCues = { values, _ -> cues += values },
             publish = {},
+            speedEngine = DopplerSpeedEngine(),
         )
 
         coordinator.advanceTimer(0L, signalGpsOutage = true)
@@ -245,9 +258,492 @@ class SessionCoordinatorTest {
     private fun reliableSample(speedKmh: Float, time: Long) = LocationSample(speedKmh, .2f, true, time)
     private fun unreliableSample(time: Long) = LocationSample(0f, null, false, time)
 
+    @Test
+    fun speedEngineSyncsWithDistanceEngineOnReliableFixesAndOutage() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, reliableSample(8f, 1_000L), LocationPosition(0.0, .0001, 1_000L))
+        assertEquals(2, speedEngine.acceptCalls)
+        assertEquals(0, speedEngine.breakChainCalls)
+
+        coordinator.advanceTimer(5_000L, signalGpsOutage = true)
+        assertEquals(1, speedEngine.breakChainCalls)
+    }
+
+    @Test
+    fun timerRetainsFreshGpsUsesSpeedEngineOutputNotRawSample() {
+        val speedEngine = FakeSpeedEngine(fixedOutput = 42.0)
+        val published = mutableListOf<RunSessionState>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false)
+
+        val state = published.last() as RunSessionState.Running
+        assertTrue(state.gpsReliable)
+        // Without the fix, this would read 9f (the raw sample's speedKmh, cached in
+        // latestReliableSample before the substitution) instead of 42f (the engine's output).
+        assertEquals(42f, state.speedKmh)
+    }
+
+    @Test
+    fun onSpeedComputedFiresOnlyOnActualReliableFixesWithEngineValue() {
+        val computed = mutableListOf<Double?>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(fixedOutput = 7.0),
+            onSpeedComputed = { computed += it },
+        )
+
+        coordinator.tick(0L, reliableSample(9f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.advanceTimer(1_000L, signalGpsOutage = false) // grace window: must NOT fire
+        coordinator.advanceTimer(5_000L, signalGpsOutage = true) // outage: must NOT fire
+
+        assertEquals(listOf(7.0), computed)
+    }
+
+    @Test
+    fun timerAndRoutineDoNotAdvanceBeforeFirstReliableFix() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val published = mutableListOf<RunSessionState>()
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
+        )
+
+        pending.advanceTimer(10_000L, signalGpsOutage = true)
+
+        assertTrue(published.isEmpty())
+        assertTrue(routine.inputs.isEmpty())
+        assertFalse(pending.isActivated)
+    }
+
+    @Test
+    fun unreliableSampleWhileAcquiringDoesNotActivate() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val published = mutableListOf<RunSessionState>()
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GPS_WEAK, null, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
+        )
+
+        pending.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, 0.0, 1_000L))
+
+        assertTrue(published.isEmpty())
+        assertTrue(routine.inputs.isEmpty())
+        assertFalse(pending.isActivated)
+    }
+
+    @Test
+    fun firstReliableFixActivatesAndStartsAtZeroWithoutAddingDistance() {
+        val published = mutableListOf<RunSessionState>()
+        val preferences = RunPreferences()
+        val pending = PendingSessionCoordinator(
+            preferences = preferences,
+            routineEngine = RoutineEngineAdapter(dev.fred.pacorun.routine.RoutineEngine(preferences)),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
+        )
+
+        pending.tick(12_000L, reliableSample(8f, 12_000L), LocationPosition(0.0, 0.0, 12_000L))
+
+        assertTrue(pending.isActivated)
+        val running = published.last() as RunSessionState.Running
+        assertEquals(0L, running.elapsedMillis)
+        assertEquals(0.0, running.totalDistanceMeters, 0.0)
+    }
+
+    @Test
+    fun onceActivatedLaterTicksDelegateToTheSameCoordinator() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pending = PendingSessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+        )
+
+        pending.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        pending.advanceTimer(1_000L, signalGpsOutage = false)
+
+        assertTrue(pending.isActivated)
+        assertEquals(2, routine.inputs.size)
+    }
+
+    @Test
+    fun isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue() {
+        val preferences = RunPreferences(confirmationSamples = 1)
+        val cues = mutableListOf<AudioCue>()
+        val coordinator = SessionCoordinator(
+            preferences = preferences,
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = PaceEvaluatorAdapter(
+                dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 9f, 1, 5_000L, false)),
+            ),
+            onCues = { values, _ -> cues += values },
+            publish = {},
+            // Real KalmanSpeedEngine, not a fake -- this is exactly what Task 4's fakes missed.
+        )
+        // Metro fisso a ~0.0001 gradi di longitudine all'equatore per ogni secondo: circa
+        // 11.13 m/s... troppo veloce. Per un passo realistico a 8 km/h serve uno spostamento di
+        // (8/3.6) m/s = 2.222 m/s, cioè 2.222/111_320*cos(0) gradi di longitudine per secondo.
+        val degreesPerSecondAt8Kmh = (8.0 / 3.6) / 111_320.0
+        var longitude = 0.0
+        var time = 0L
+
+        // Alcuni fix reali a ritmo costante, per lasciare al Kalman il tempo di convergere.
+        // 40s: serve tempo anche alla EmaPaceSmoother reale (tau=6s) a valle del Kalman, non solo al Kalman stesso.
+        repeat(40) {
+            longitude += degreesPerSecondAt8Kmh
+            time += 1_000L
+            coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+        }
+        cues.clear()
+
+        // Un singolo fix isolato giudicato inaffidabile -- non un'interruzione prolungata.
+        // longitude avanza comunque di un secondo pieno: il runner si è mosso davvero, solo il
+        // GPS non ce l'ha detto in modo affidabile per quell'istante (la sua posizione qui non
+        // viene comunque mai letta da nessun motore, dato che il fix è marcato inaffidabile).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, unreliableSample(time), LocationPosition(0.0, longitude, time))
+
+        // Il prossimo fix riprende esattamente lo stesso ritmo di prima -- il gap dall'ultimo
+        // fix REALMENTE usato è di 2 secondi, e riflette correttamente 2 secondi di
+        // spostamento vero a 8 km/h (non un dimezzamento fittizio della velocità media).
+        longitude += degreesPerSecondAt8Kmh
+        time += 1_000L
+        coordinator.tick(time, reliableSample(8f, time), LocationPosition(0.0, longitude, time))
+
+        // Prima del fix: il motore si resetta, riparte da una velocità vicina a 0, e
+        // PaceEvaluator emette TOO_SLOW pur non essendoci stato alcun cambio di ritmo reale.
+        assertTrue(
+            "spurious pace cue after an isolated unreliable fix, no real pace change occurred: $cues",
+            AudioCue.TOO_SLOW !in cues,
+        )
+    }
+
+    @Test
+    fun isolatedUnreliableFixDoesNotBreakSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+
+        assertEquals(0, speedEngine.breakChainCalls)
+    }
+
+    @Test
+    fun sustainedStreamOfUnreliableFixesEventuallyBreaksSpeedEngineChain() {
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        // Flusso continuo di fix INAFFIDABILI (non silenzio) -- un tick al secondo. Prima dei
+        // 3 secondi (DEFAULT_MAX_AGE_MILLIS) dall'ultimo fix affidabile, nessun reset.
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        assertEquals(0, speedEngine.breakChainCalls)
+
+        // A t=3000, sono passati 3 secondi REALI dall'ultimo fix affidabile (t=0) -- deve
+        // resettarsi anche se il GPS continua a rispondere (male), non è mai stato silenzio.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        assertEquals(1, speedEngine.breakChainCalls)
+
+        // Chiamate successive nello stesso episodio possono richiamare breakChain() di nuovo --
+        // è innocuo (idempotente), non un difetto da evitare con un flag dedicato.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        assertEquals(2, speedEngine.breakChainCalls)
+    }
+
+    @Test
+    fun everyEmittedCueProducesItsOwnAudioCueEmittedEvent() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = true)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.TOO_FAST, 9f, Cue.TOO_FAST))
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(1_000L, reliableSample(9f, 1_000L), LocationPosition(0.0, 0.0, 1_000L))
+
+        val cueEvents = events.filterIsInstance<dev.fred.pacorun.eventlog.AudioCueEmittedEvent>()
+        assertEquals(
+            listOf("ROUTINE_START", "TOO_FAST"),
+            cueEvents.map { it.cueType },
+        )
+        assertEquals(3.0, cueEvents[0].cumulativeDistanceMeters, .001) // FakeRoutineEngine's fixed totalDistanceMeters
+        assertEquals(9f, cueEvents[0].speedKmh)
+    }
+
+    @Test
+    fun enteringOutageEmitsDistanceChainBrokenEventBeforeBreakingTheDistanceChain() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.DistanceChainBrokenEvent(
+                    1_000L,
+                    dev.fred.pacorun.eventlog.DistanceChainBreakReason.GPS_OUTAGE_ENTERED,
+                ),
+            ),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.DistanceChainBrokenEvent>(),
+        )
+    }
+
+    @Test
+    fun sustainedUnreliableStreamEmitsSpeedChainBrokenEventOnlyOnceAcrossTheWholeOutage() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val speedEngine = FakeSpeedEngine()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = speedEngine,
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        // DEFAULT_MAX_AGE_MILLIS is 3000ms -- the staleness gate first opens on this tick.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+        // The gate stays open on every subsequent unreliable tick (elapsed keeps growing past the
+        // threshold) -- speedEngine.breakChain() is called again each time (idempotent, unchanged
+        // production behavior), but the event itself must not repeat.
+        coordinator.tick(4_000L, unreliableSample(4_000L), LocationPosition(0.0, .0004, 4_000L))
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+
+        assertEquals(
+            listOf(
+                dev.fred.pacorun.eventlog.SpeedChainBrokenEvent(
+                    3_000L,
+                    dev.fred.pacorun.eventlog.SpeedChainBreakReason.STALE_NO_RECENT_RELIABLE_FIX,
+                ),
+            ),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>(),
+        )
+        assertEquals(3, speedEngine.breakChainCalls) // breakChain() itself still fires every stale tick (3000/4000/5000), unguarded
+    }
+
+    @Test
+    fun aFreshReliableFixAfterAnOutageAllowsTheEventToFireAgainOnTheNextOutage() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
+            paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(),
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L)) // fires once
+        coordinator.tick(4_000L, reliableSample(8f, 4_000L), LocationPosition(0.0, .0004, 4_000L)) // outage ends
+        coordinator.tick(5_000L, unreliableSample(5_000L), LocationPosition(0.0, .0005, 5_000L))
+        coordinator.tick(6_000L, unreliableSample(6_000L), LocationPosition(0.0, .0006, 6_000L))
+        coordinator.tick(7_000L, unreliableSample(7_000L), LocationPosition(0.0, .0007, 7_000L)) // fires again, new episode
+
+        assertEquals(
+            listOf(3_000L, 7_000L),
+            events.filterIsInstance<dev.fred.pacorun.eventlog.SpeedChainBrokenEvent>().map { it.elapsedRealtimeMillis },
+        )
+    }
+
+    @Test
+    fun profileChangePurgesThePaceSmoother() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = true)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun earlyWalkInTenCuePurgesThePaceSmootherAheadOfTheRealPhaseChange() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false, cues = listOf(RoutineCue.WALK_IN_TEN))
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun staleGpsRecoveryPurgesThePaceSmootherWhenTheSpeedChainBreaks() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        val smoother = FakePaceSmoother()
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = FakeSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+        coordinator.tick(1_000L, unreliableSample(1_000L), LocationPosition(0.0, .0001, 1_000L))
+        coordinator.tick(2_000L, unreliableSample(2_000L), LocationPosition(0.0, .0002, 2_000L))
+        // DEFAULT_MAX_AGE_MILLIS is 3000ms -- the staleness gate first opens on this tick, same
+        // setup as sustainedUnreliableStreamEmitsSpeedChainBrokenEventOnlyOnceAcrossTheWholeOutage.
+        coordinator.tick(3_000L, unreliableSample(3_000L), LocationPosition(0.0, .0003, 3_000L))
+
+        assertEquals(1, smoother.purgeCalls)
+    }
+
+    @Test
+    fun paceEvaluatorReceivesTheSmoothedSpeedAsInputAndTheRawSpeedAsThePayloadParameter() {
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null))
+        // Doubles every raw reading, so smoothed and raw are unmistakably different values.
+        val smoother = FakePaceSmoother(transform = { it * 2f })
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = {},
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        assertEquals(listOf(8f), smoother.acceptedRawSpeeds) // the smoother itself always sees the raw reading
+        assertEquals(16f, pace.samples.single().speedKmh) // PaceEvaluator decides on the SMOOTHED value
+        assertEquals(8f, pace.rawSpeeds.single()) // ...but the raw value still threads through as the payload param
+        assertEquals(0, smoother.purgeCalls)
+    }
+
+    @Test
+    fun smoothingNeverLeaksIntoTheDisplayedRoutineInputOrLoggedRawSpeedFields() {
+        val events = mutableListOf<dev.fred.pacorun.eventlog.SessionEvent>()
+        val routine = FakeRoutineEngine(mutableListOf(), profileChanged = false)
+        val pace = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.TOO_FAST, 8f, Cue.TOO_FAST))
+        val published = mutableListOf<RunSessionState>()
+        // Doubles every raw reading -- if smoothing leaked into any of the three fields below,
+        // they'd read 16f instead of the raw 8f and this test would catch it immediately.
+        val smoother = FakePaceSmoother(transform = { it * 2f })
+        val coordinator = SessionCoordinator(
+            preferences = RunPreferences(),
+            routineEngine = routine,
+            paceEvaluator = pace,
+            onCues = { _, _ -> },
+            publish = published::add,
+            speedEngine = DopplerSpeedEngine(),
+            paceSmoother = smoother,
+            onEvent = events::add,
+        )
+
+        coordinator.tick(0L, reliableSample(8f, 0L), LocationPosition(0.0, 0.0, 0L))
+
+        val state = published.single() as RunSessionState.Running
+        assertEquals(8f, state.speedKmh) // RunSessionState.speedKmh: raw, per Decision 6
+        assertEquals(8f, routine.lastInput.currentReliableSpeedKmh) // RoutineInput.currentReliableSpeedKmh: raw
+        val cueEvent = events.filterIsInstance<dev.fred.pacorun.eventlog.AudioCueEmittedEvent>().first()
+        assertEquals(8f, cueEvent.speedKmh) // AudioCueEmittedEvent.speedKmh: raw
+    }
+
     private class FakeRoutineEngine(
         private val events: MutableList<String>,
         private val profileChanged: Boolean,
+        private val cues: List<RoutineCue> = listOf(RoutineCue.ROUTINE_START),
     ) : SessionRoutineEngine {
         lateinit var lastInput: RoutineInput
         val inputs = mutableListOf<RoutineInput>()
@@ -262,7 +758,7 @@ class SessionCoordinatorTest {
                 intervalRemainingMillis = 4_000L,
                 totalDistanceMeters = 3.0,
                 routineDistanceMeters = 2.0,
-                cues = listOf(RoutineCue.ROUTINE_START),
+                cues = cues,
                 profileChanged = profileChanged,
             )
         }
@@ -273,14 +769,48 @@ class SessionCoordinatorTest {
         private val result: PaceResult,
     ) : SessionPaceEvaluator {
         val samples = mutableListOf<LocationSample>()
+        val rawSpeeds = mutableListOf<Float?>()
         override fun updateConfig(config: PaceConfig) {
             events += "reset"
         }
 
-        override fun accept(sample: LocationSample): PaceResult {
+        override fun accept(sample: LocationSample, rawSpeedKmh: Float?): PaceResult {
             events += "pace"
             samples += sample
+            rawSpeeds += rawSpeedKmh
             return result
+        }
+    }
+
+    private class FakePaceSmoother(private val transform: (Float) -> Float = { it }) : SessionPaceSmoothingEngine {
+        var purgeCalls = 0
+            private set
+        val acceptedRawSpeeds = mutableListOf<Float>()
+
+        override fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float {
+            acceptedRawSpeeds += rawSpeedKmh
+            return transform(rawSpeedKmh)
+        }
+
+        override fun purge() {
+            purgeCalls++
+        }
+    }
+
+    private class FakeSpeedEngine(private val fixedOutput: Double = 0.0) : SessionSpeedEngine {
+        var acceptCalls = 0
+            private set
+        var breakChainCalls = 0
+            private set
+
+        override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double {
+            acceptCalls++
+            return fixedOutput
+        }
+
+        override fun breakChain(): Double {
+            breakChainCalls++
+            return 0.0
         }
     }
 }
