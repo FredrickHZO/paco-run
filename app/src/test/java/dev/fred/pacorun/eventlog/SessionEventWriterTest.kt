@@ -57,7 +57,27 @@ class SessionEventWriterTest {
 
         assertEquals(
             "{\"type\":\"PaceStateConfirmedEvent\",\"elapsedRealtimeMillis\":1000," +
-                "\"fromState\":null,\"toState\":\"GOOD\",\"speedKmh\":8.0,\"producedAudibleCue\":false}",
+                "\"fromState\":null,\"toState\":\"GOOD\",\"speedKmh\":8.0,\"producedAudibleCue\":false," +
+                "\"rawSpeedKmh\":null}",
+            SessionEventWriter.toJsonLine(event),
+        )
+    }
+
+    @Test
+    fun paceStateConfirmedEventSerializesRawSpeedKmhWhenPresent() {
+        val event = PaceStateConfirmedEvent(
+            elapsedRealtimeMillis = 1_000L,
+            fromState = dev.fred.pacorun.pace.PaceState.TOO_SLOW,
+            toState = dev.fred.pacorun.pace.PaceState.GOOD,
+            speedKmh = 7.8f,
+            producedAudibleCue = true,
+            rawSpeedKmh = 7.4f,
+        )
+
+        assertEquals(
+            "{\"type\":\"PaceStateConfirmedEvent\",\"elapsedRealtimeMillis\":1000," +
+                "\"fromState\":\"TOO_SLOW\",\"toState\":\"GOOD\",\"speedKmh\":7.8,\"producedAudibleCue\":true," +
+                "\"rawSpeedKmh\":7.4}",
             SessionEventWriter.toJsonLine(event),
         )
     }

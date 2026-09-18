@@ -120,6 +120,7 @@ object SessionEventWriter {
         enum("toState", event.toState)
         floatOrNull("speedKmh", event.speedKmh)
         boolean("producedAudibleCue", event.producedAudibleCue)
+        floatOrNull("rawSpeedKmh", event.rawSpeedKmh)
     }
 
     private fun paceCandidateStartedEvent(event: PaceCandidateStartedEvent) = json {

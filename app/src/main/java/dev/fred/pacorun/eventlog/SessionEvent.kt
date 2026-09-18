@@ -96,6 +96,10 @@ data class PaceStateConfirmedEvent(
     val toState: PaceState,
     val speedKmh: Float?,
     val producedAudibleCue: Boolean,
+    // Appended LAST with a default, not inserted before producedAudibleCue: this keeps every
+    // existing positional PaceStateConfirmedEvent(...) call site (e.g. PaceEvaluatorTest.kt)
+    // compiling -- inserting it earlier would silently shift producedAudibleCue's position.
+    val rawSpeedKmh: Float? = null,
 ) : SessionEvent
 
 data class PaceCandidateStartedEvent(
