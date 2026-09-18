@@ -354,8 +354,9 @@ class PaceEvaluatorTest {
         // The baseline must actually reproduce repeated flapping on these parameters, or the
         // synthetic trajectory isn't representative of the real worst case (design doc Decision
         // 8.1's own instruction: if it doesn't flap, revise the parameters before drawing any
-        // conclusion about tau). If this fails, adjust periodSeconds within the design doc's
-        // specified 6-8s range before touching anything else.
+        // conclusion about tau). If this fails, try periodSeconds=6.0 (at 1Hz sampling, only
+        // roughly 6-7s actually reproduces the flapping -- 8.0 does not, since the below-band
+        // phase then only lands once per cycle).
         assertTrue("baseline should flap repeatedly on a 0.7 km/h band, got $baselineFlips", baselineFlips >= 5)
         // EMA at tau=6.0s must cut that flapping substantially, not just marginally.
         assertTrue(

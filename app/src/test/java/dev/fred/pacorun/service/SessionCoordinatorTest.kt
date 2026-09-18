@@ -708,6 +708,7 @@ class SessionCoordinatorTest {
         assertEquals(listOf(8f), smoother.acceptedRawSpeeds) // the smoother itself always sees the raw reading
         assertEquals(16f, pace.samples.single().speedKmh) // PaceEvaluator decides on the SMOOTHED value
         assertEquals(8f, pace.rawSpeeds.single()) // ...but the raw value still threads through as the payload param
+        assertEquals(0, smoother.purgeCalls)
     }
 
     @Test
