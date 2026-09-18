@@ -13,7 +13,7 @@
 
 Entrambi i documenti hanno lasciato esplicitamente aperta la costante di tempo dell'EMA (quanti secondi di "memoria"), in attesa di dati reali per-tick — che ora esistono grazie a **P1** (`docs/superpowers/specs/2026-09-14-session-event-logging-design.md`, già implementato e fuso su `feature/session-event-logging`): un log strutturato JSON Lines di ogni decisione dell'app durante una sessione reale.
 
-**Cosa fa questo documento, esattamente:** (1) usa il log reale P1 di una corsa vera per stimare la costante di tempo dell'EMA con numeri reali, non un valore rotondo scelto a intuito; (2) decide precisamente dove vive il nuovo componente di smoothing nel codice e come si collega a `SessionCoordinator`/`PaceEvaluator`; (3) decide esplicitamente, con motivazione, se includere ora o rimandare il raffinamento del "purge anticipato" per le transizioni RUN/WALK programmate, individuato dalla seconda revisione avversariale del documento di ricerca ma non ancora deciso in nessun documento precedente.
+**Cosa fa questo documento, esattamente:** (1) usa il log reale P1 di una corsa vera per stimare la costante di tempo dell'EMA con numeri reali, non un valore rotondo scelto a intuito; (2) decide precisamente dove vive il nuovo componente di smoothing nel codice e come si collega a `SessionCoordinator`/`PaceEvaluator`; (3) decide esplicitamente, con motivazione, se includere ora o rimandare il raffinamento del "purge anticipato" per le transizioni RUN/WALK programmate, individuato dalla seconda revisione avversariale del documento di ricerca ma non ancora deciso in nessun documento precedente; (4) specifica un test sintetico del caso peggiore e un'analisi di sensitività su τ (Decisione 8), aggiunti dopo una revisione avversariale di questo stesso documento e una domanda diretta del proprietario sulla genericità del design, da eseguire come parte dell'implementazione di P2.
 
 **Nota sui dati disponibili, corretta rispetto al brief iniziale:** il brief di questo lavoro citava "due" log evento reali da analizzare. Verificato con un `ls` diretto della cartella Downloads: **esiste un solo file di log eventi JSON Lines reale sul disco**, `paco-run-2026-09-15-110804-events.jsonl` (2026-09-15, sessione WALK_RUN di 86 minuti). Il "secondo run" citato nel brief (342 confronti Strava, zero divergenze) è la validazione GPS-vs-Strava basata su GPX della **stessa** corsa del 2026-09-15, non un secondo log eventi distinto — P1 non esisteva ancora prima di quella data. Questo documento usa quindi un solo run reale per la stima numerica sotto, coerentemente segnalato come limite esplicito in fondo al documento, non nascosto.
 
@@ -33,6 +33,8 @@ Script Python (`/tmp/claude-1000/.../scratchpad/analyze_pace_excursions.py`, thr
 1. Ricostruisce gli intervalli di fase RUN da `RoutinePhaseChangedEvent` (`toPhase == "RUN"` → inizio intervallo, successivo `fromPhase == "RUN"` → fine).
 2. Filtra `PaceStateConfirmedEvent`/`PaceCandidateStartedEvent`/`PaceCandidateAbandonedEvent` a quelli che cadono dentro un intervallo RUN (la banda più stretta configurata, dove il fenomeno è più marcato).
 3. Calcola il tempo tra `PaceStateConfirmedEvent` consecutivi **all'interno dello stesso intervallo RUN** (scartando esplicitamente i gap che attraversano un segmento WALK tra due intervalli RUN separati — un bug della prima versione dello script, corretto: 22 gap spuri di questo tipo sono stati esclusi).
+
+**Scelta metodologica esplicita, da non nascondere: come viene trattato l'ultimo intervallo RUN del log, mai chiuso.** La registrazione si interrompe a metà di un intervallo RUN (nessun `RoutinePhaseChangedEvent` di chiusura, e lo schema P1 non ha nemmeno un evento di fine sessione). I numeri riportati sotto (n=23 intervalli, n=130 gap, mediana 6.5s) trattano quell'ultimo intervallo come se finisse all'ultimo timestamp del log. Applicando invece la metodologia letta alla lettera sopra — solo intervalli con un `RoutinePhaseChangedEvent` di chiusura reale — si ottiene n=22 intervalli (21.95 minuti di tempo RUN totale), n=128 gap, **mediana 6.7s**. La conclusione sostanziale (τ nell'intervallo 6-7s) non cambia in nessuno dei due casi.
 
 ### Numeri trovati
 
@@ -62,20 +64,23 @@ Distribuzione (bucket da 5s): 51 campioni in 0-5s, 50 in 5-10s, 16 in 10-15s, po
 | max | 40.0s |
 | media | 10.0s |
 
-**Flip diretto estremo-a-estremo (`TOO_SLOW`↔`TOO_FAST`, il sintomo esatto del flapping) all'interno dello stesso intervallo RUN: solo n=2 campioni.** Troppo raro per una statistica affidabile con questo dataset — atteso, perché la banda qui è più larga (1.5 km/h, non 0.7 km/h) della corsa che ha originariamente mostrato 25 flip diretti, e perché un intervallo RUN di soli 60s lascia poco spazio per un flip completo estremo-a-estremo prima che la fase stessa cambi. La percentuale di tempo in `GOOD` in RUN qui è 71/153 = 46%, contro il 16% della corsa originale a banda stretta — coerente con l'effetto atteso di una banda più larga.
+**Flip diretto estremo-a-estremo (`TOO_SLOW`↔`TOO_FAST`, il sintomo esatto del flapping) all'interno dello stesso intervallo RUN: solo n=2 campioni.** Troppo raro per una statistica affidabile con questo dataset — atteso, perché la banda qui è più larga (1.5 km/h, non 0.7 km/h) della corsa che ha originariamente mostrato 25 flip diretti, e perché un intervallo RUN di soli 60s lascia poco spazio per un flip completo estremo-a-estremo prima che la fase stessa cambi. Su 153 episodi confermati totali in RUN, 71 sono `GOOD` (71/153 = 46% **degli episodi**) — ma questo è un conteggio a episodi, non la stessa metrica del 16.1% citato dal documento di validazione 2026-09-13 e non è direttamente comparabile ad esso (correzione rispetto a una versione precedente di questo documento, che li confrontava come se fossero la stessa cosa).
+
+**Il confronto corretto, comparabile riga per riga con quel 16.1%, è pesato nel tempo, non a episodi.** "Tempo-pesato" significa sommare quanto tempo lo stato confermato resta in ciascun valore (dalla conferma di un episodio alla conferma del successivo), non contare gli episodi uno per uno: un episodio di `GOOD` durato 40s pesa 40 volte più di uno durato 1s in un conteggio a tempo, mentre pesa uguale in un conteggio a episodi — la stessa distinzione che rendeva sbagliato il confronto originale. Ricalcolato sullo stesso log 2026-09-15 (fasi RUN, variante con l'ultimo intervallo chiuso al log, vedi nota metodologica sopra): `GOOD` occupa **831.8s su 1345.2s di tempo RUN totale = 61.8%** (`TOO_SLOW` 19.5%, `TOO_FAST` 18.6%) — contro il **16.1%** (209.8s/1304.8s) della corsa 2026-09-13 a banda stretta. Coerente con l'effetto atteso di una banda più larga (1.5 vs 0.7 km/h), e coerente in ordine di grandezza con una stima indipendente di 61.3% ottenuta nella revisione avversariale che ha richiesto questa correzione (la piccola differenza è dovuta al trattamento dell'intervallo RUN finale mai chiuso, vedi nota metodologica sopra — non cambia la conclusione).
 
 **Metrica scartata come non rilevante per la scelta di τ: tempo da inizio candidato a conferma (n=143, mediana 1.0s).** Questa metrica misura quasi esclusivamente la latenza del debounce già esistente (`confirmationSamples=2` a una cadenza fix di ~1 Hz ⇒ ~1s tra il campione che avvia il candidato e quello che lo conferma), non la durata fisiologica reale dell'escursione di ritmo — non è il numero giusto su cui basare τ.
 
 ### La scelta: τ = 6.0 secondi
 
-Il gap mediano di cambio-stato-confermato (6.5s, sia sull'insieme completo sia sul sottoinsieme "da GOOD") è la misura più diretta e meno contaminata dal debounce di **quanto dura un ciclo naturale di oscillazione** del ritmo confermato durante RUN — esattamente il timescale che un'EMA deve attenuare senza uccidere la risposta a un cambio di sforzo genuino. **τ = 6.0s**, arrotondato alla decina di centesimo più vicina alla mediana osservata, è proposto come valore di partenza.
+Il gap mediano di cambio-stato-confermato (6.5s, sia sull'insieme completo sia sul sottoinsieme "da GOOD") è la misura più diretta e meno contaminata dal debounce di **quanto dura un ciclo naturale di oscillazione** del ritmo confermato durante RUN — esattamente il timescale che un'EMA deve attenuare senza uccidere la risposta a un cambio di sforzo genuino. **τ = 6.0s** è proposto come valore di partenza: la mediana osservata è 6.5s, arrotondata per difetto al secondo intero (non alla decina di secondo più vicina, che lascerebbe 6.5 invariato — correzione rispetto a una versione precedente di questo documento che descriveva un arrotondamento diverso da quello effettivamente applicato). L'arrotondamento per difetto, non per eccesso a 7.0s, è una scelta deliberata verso il lato leggermente più reattivo (meno memoria, meno lag di decisione) tra i due secondi interi adiacenti alla mediana, non un calcolo che produce 6.0 in modo univoco da 6.5 — un altro arrotondamento ragionevole (per eccesso, o al secondo pari più vicino) avrebbe dato 7.0 in modo altrettanto legittimo; nulla nei dati impone 6.0 su 7.0 con certezza, coerente con il trattamento esplicito di τ come stima di partenza rivedibile, non come valore derivato con precisione.
 
 Questo numero **converge in modo indipendente** con la stima puramente qualitativa già presente in entrambi i documenti di ricerca precedenti ("una breve media mobile, 5-10s"), scelta allora senza alcun dato reale — un segnale di coerenza incoraggiante, non una prova che il numero sia definitivamente corretto.
 
-**Limiti espliciti di questa stima, da non nascondere:**
+**Il limite più importante di questa stima, da leggere prima di ogni altro, non come una voce tra le altre in una lista di limiti:** la corsa 2026-09-15 usata per stimare τ **non è il caso peggiore** — è, al contrario, un caso già sostanzialmente attenuato. La sua banda RUN (1.5 km/h) è **più del doppio** di quella della corsa 2026-09-13 che ha originariamente fatto nascere questa intera indagine (0.7 km/h, 25 flip diretti estremo-a-estremo confermati). Una banda più larga riduce da sola la frequenza e l'intensità del flapping — è esattamente per questo che nella corsa 2026-09-15 si osservano solo 2 flip diretti invece di decine, e che `GOOD` occupa 61.8% del tempo RUN invece del 16.1% della corsa a banda stretta (vedi sopra). Questo significa che **τ=6.0s è stato stimato in un regime in cui il problema che deve risolvere era già in gran parte attenuato da un'altra leva (la larghezza della banda), non nel regime patologico che ha originariamente motivato la ricerca.** Il gap mediano di 6.5s osservato qui è probabilmente più lungo di quello che si otterrebbe su una banda stretta come 0.7 km/h, dove le escursioni oltre banda dovrebbero, in linea di principio, essere più frequenti e più brevi — cioè τ potrebbe dover essere più corto, non più lungo, per il caso che ha originariamente motivato questo lavoro. Nessun log eventi P1 esiste per la corsa 2026-09-13 (precedente a P1) per verificarlo direttamente sui dati reali di quella corsa — motivo diretto per cui Decisione 8 (sotto) aggiunge un test sintetico costruito apposta per riprodurre quelle condizioni, invece di fidarsi solo di questa stima su un caso già attenuato.
 
-- **Una sola corsa reale, un solo corridore, una sola configurazione di routine** (RUN 60s/WALK 120s, banda RUN 1.5 km/h). Non è noto se τ=6.0s regga con durate di intervallo molto diverse (es. RUN da 30s) o bande più strette.
-- **La banda RUN di questa corsa (1.5 km/h) è più larga di quella della corsa che ha originariamente motivato l'intera indagine (0.7 km/h)** — il fenomeno di flapping diretto qui è già attenuato dalla banda più larga, quindi il gap mediano di 6.5s è probabilmente una stima leggermente **più lunga** di quella che si otterrebbe su una banda stretta come 0.7 km/h (dove le escursioni verso l'esterno della banda dovrebbero, in linea di principio, essere più frequenti/brevi). Non è stato possibile verificarlo: nessun log eventi P1 esiste per la corsa a banda stretta del 2026-09-13, che è precedente all'implementazione di P1.
+**Altri limiti espliciti di questa stima, da non nascondere:**
+
+- **Una sola corsa reale, un solo corridore, una sola configurazione di routine** (RUN 60s/WALK 120s, banda RUN 1.5 km/h). Non è noto se τ=6.0s regga con durate di intervallo molto diverse (es. RUN da 30s).
 - **n=130 (o n=58 per il sottoinsieme "da GOOD") è un campione modesto** per un intervallo di confidenza stretto — la distribuzione ha una coda lunga fino a 40s, non è simmetrica.
 
 **Trattamento esplicito, come richiesto dal proprietario in entrambi i documenti precedenti:** τ=6.0s è una **stima di partenza ragionevole da validare sulla prossima corsa reale**, non un parametro definitivamente corretto. Va trattato con la stessa disciplina di `qHigh`/`innovationEmaAlpha` in `SpeedEstimator` — una costante di codice tarata empiricamente, rivedibile con la stessa procedura (nuovo dato reale + nuova analisi), **non un'impostazione utente** in `RunPreferences` (l'utente non deve capire cos'è una costante di tempo EMA — coerente con la filosofia "Play Store polish bar" del progetto).
@@ -268,8 +273,8 @@ fun accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceR
             fromState = previous,
             toState = pace,
             speedKmh = sample.speedKmh,   // ORA: il valore SMUSSATO su cui PaceEvaluator ha deciso
-            rawSpeedKmh = rawSpeedKmh,    // NUOVO: il vero valore grezzo di KalmanSpeedEngine allo stesso istante
             producedAudibleCue = paceCue != null,
+            rawSpeedKmh = rawSpeedKmh,    // NUOVO: il vero valore grezzo di KalmanSpeedEngine allo stesso istante -- ULTIMO parametro, vedi sotto
         ),
     )
     // ...
@@ -293,9 +298,86 @@ class PaceEvaluatorAdapter(private val evaluator: PaceEvaluator) : SessionPaceEv
 
 `PaceCandidateStartedEvent`/`PaceCandidateAbandonedEvent` non portano alcun campo di velocità oggi — nessun conflitto, nessuna modifica necessaria a questi due tipi.
 
+**Il campo `rawSpeedKmh` va aggiunto come ULTIMO parametro del costruttore di `PaceStateConfirmedEvent`, dopo `producedAudibleCue`, non tra `speedKmh` e `producedAudibleCue`.** L'ordine reale attuale dei campi (letto da `app/src/main/java/dev/fred/pacorun/eventlog/SessionEvent.kt`, branch `feature/session-event-logging`, righe 93-99) è `elapsedRealtimeMillis, fromState, toState, speedKmh, producedAudibleCue`:
+
+```kotlin
+// SessionEvent.kt -- ordine reale attuale, verificato leggendo il file
+data class PaceStateConfirmedEvent(
+    override val elapsedRealtimeMillis: Long,
+    val fromState: PaceState?,
+    val toState: PaceState,
+    val speedKmh: Float?,
+    val producedAudibleCue: Boolean,
+    val rawSpeedKmh: Float? = null,   // NUOVO -- ULTIMO, con default, per non rompere i call site posizionali esistenti
+) : SessionEvent
+```
+
+Appenderlo in coda con un default `= null` mantiene compilabili le chiamate posizionali esistenti a 5 argomenti (che continuerebbero a compilare con `rawSpeedKmh` implicitamente `null`, da correggere comunque nei test dove serve asserire il vero valore atteso — vedi sotto). Inserirlo prima di `producedAudibleCue`, come mostrava una versione precedente di questo documento nello snippet sopra (ora corretto), avrebbe invece spostato la posizione di `producedAudibleCue`, rompendo silenziosamente o con un errore di tipo qualunque chiamata posizionale che lo passa nella quinta posizione — esattamente il tipo di rottura da evitare aggiungendo un campo a una classe con call site posizionali già esistenti in questo codebase.
+
+**Il gap più importante trovato da questa revisione, non presente in nessuna versione precedente di questo documento: `SessionEventWriter.kt` non era mai stato letto, e senza modificarlo `rawSpeedKmh` non arriverebbe mai al file JSONL.** `app/src/main/java/dev/fred/pacorun/eventlog/SessionEventWriter.kt` è un serializzatore JSON **scritto a mano, campo per campo** (non basato su reflection — vedi il commento in testa al file stesso), con un `when` esaustivo per tipo di evento e una funzione privata dedicata per ciascuno. La funzione per questo tipo di evento, `paceStateConfirmedEvent()` (righe 116-123), oggi serializza esplicitamente solo cinque campi:
+
+```kotlin
+// SessionEventWriter.kt -- stato reale attuale, letto per questa revisione
+private fun paceStateConfirmedEvent(event: PaceStateConfirmedEvent) = json {
+    string("type", "PaceStateConfirmedEvent")
+    long("elapsedRealtimeMillis", event.elapsedRealtimeMillis)
+    enumOrNull("fromState", event.fromState)
+    enum("toState", event.toState)
+    floatOrNull("speedKmh", event.speedKmh)
+    boolean("producedAudibleCue", event.producedAudibleCue)
+}
+```
+
+Aggiungere `rawSpeedKmh` alla data class **da sola non basta**: senza aggiungere anche una riga a questa funzione, il campo esisterebbe sulla classe Kotlin ma non verrebbe mai scritto nel log JSONL — vanificando silenziosamente l'intero scopo del cambiamento di schema (usare la divergenza grezzo-vs-smussato per validare τ sulla prossima corsa). **Decisione/passo esplicito, da includere nel piano di implementazione:** `paceStateConfirmedEvent()` deve guadagnare `floatOrNull("rawSpeedKmh", event.rawSpeedKmh)`, verosimilmente come ultima riga, seguendo lo stesso ordine del costruttore.
+
+**Tre rotture reali nei test esistenti, trovate leggendo il codice per questa revisione — da elencare qui esplicitamente così un piano di implementazione le trovi già pronte come task, non da riscoprire:**
+
+1. **`app/src/test/java/dev/fred/pacorun/pace/PaceEvaluatorTest.kt` costruisce `PaceStateConfirmedEvent` posizionalmente** in più punti (es. riga 206: `PaceStateConfirmedEvent(1_000L, null, PaceState.TOO_FAST, 8.8f, true)`, 5 argomenti nell'ordine attuale). Con `rawSpeedKmh` in coda e default `null`, queste chiamate continuano a compilare, ma vanno comunque aggiornate dove il test deve asserire il vero `rawSpeedKmh` prodotto da `PaceEvaluator.accept(sample, rawSpeedKmh)` (altrimenti l'asserzione confronterebbe un valore atteso `null` con un valore reale non-null, e fallirebbe a runtime, non a compile time).
+2. **`app/src/test/java/dev/fred/pacorun/eventlog/SessionEventWriterTest.kt` ha un'asserzione a stringa JSON esatta per questo tipo di evento** (il test che verifica `paceStateConfirmedEvent()`, righe ~50-62) — non è "rotto" nel senso di un bug esistente, ma **va aggiornato** per includere `"rawSpeedKmh":...` nell'output atteso non appena il serializzatore cambia; un aggiornamento richiesto, da elencare come task, non da scoprire durante l'implementazione.
+3. **`app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt`'s `FakePaceEvaluator`** (righe 647-661) implementa `SessionPaceEvaluator` con la firma odierna `override fun accept(sample: LocationSample): PaceResult`. Quando la firma dell'interfaccia cambia in `accept(sample: LocationSample, rawSpeedKmh: Float? = sample.speedKmh): PaceResult` (sopra), **questo test double va aggiornato di conseguenza**, non solo `PaceEvaluatorAdapter` (la sua implementazione di produzione) — altrimenti `FakePaceEvaluator` smette di implementare l'interfaccia e il modulo di test non compila più.
+
 ## Decisione 7 — nessun nuovo tipo di evento per i tre trigger di purge
 
 I tre momenti in cui `paceSmoother.purge()` scatta (Decisione 4) sono **già tutti osservabili nel log P1 esistente**, senza aggiungere nulla: il purge di fase (4.1) coincide con `RoutinePhaseChangedEvent`; il purge anticipato (4.2) coincide con l'`AudioCueEmittedEvent` di `WALK_IN_TEN`/`RUN_IN_TEN`; il purge da GPS stantio (4.3) coincide con `SpeedChainBrokenEvent(reason=STALE_NO_RECENT_RELIABLE_FIX)`. Aggiungere un quarto tipo di evento dedicato solo a "il purge è scattato" sarebbe registrare un'informazione già interamente ricostruibile per join su `elapsedRealtimeMillis` — esattamente il tipo di "log inutile" che il documento P1 ha esplicitamente escluso come principio guida, applicato qui allo stesso modo.
+
+## Decisione 8 — validare τ prima della prossima corsa reale, dentro P2: test sintetico + analisi di sensitività
+
+**Contesto della decisione, aggiunta dopo la stesura iniziale di questo documento, su domanda diretta del proprietario:** il proprietario ha chiesto se questo design fosse implicitamente tarato sul proprio range di ritmo configurato personale, piuttosto che generico. Risposta verificata: **no** — il meccanismo EMA/purge (Decisioni 2-5) non dipende da nessun valore di range specifico, solo τ (Decisione 1) è una costante empirica derivata da dati, e quella dipendenza è già dichiarata esplicitamente nei limiti sopra. La domanda ha però portato a concordare due modi concreti per alzare la fiducia in τ **prima** della prossima corsa reale, entrambi da fare **come parte dell'implementazione e del testing di P2**, non come una fase di ricerca separata né rimandati a "dopo": un test sintetico del caso peggiore, e un'analisi di sensitività sui dati reali già disponibili.
+
+### 8.1 — Test sintetico del caso peggiore (banda stretta, alta frequenza di oscillazione)
+
+**Precedente da seguire, stesso stile, non un nuovo framework di test:** questo progetto ha già una disciplina di validazione consolidata per `SpeedEstimator` — scenari sintetici prima, conferma su corsa reale poi (`app/src/test/java/dev/fred/pacorun/service/SpeedEstimatorTest.kt`: `NoisyConstantVelocityTrajectory`, una traiettoria a velocità vera nota con rumore gaussiano iniettato sulle posizioni, e `sustainedAccelerationTriggersFastSettlingViaAdaptiveProcessNoise`/`sustainedAccelerationSettlesFasterThanFixedQWithRealNoise`, che confrontano un comportamento adattivo contro un controllo a parametro fisso su una traiettoria deterministica a gradino, con tolleranze numeriche esplicite). Il test sintetico per τ deve seguire lo stesso stile: traiettoria costruita esplicitamente in codice, non registrata da un dispositivo reale, con numeri e tolleranze motivati nei commenti.
+
+**Parametri di partenza, da riprodurre le condizioni della corsa 2026-09-13 (banda stretta, non quella 2026-09-15 usata per stimare τ):**
+
+- **Banda RUN: 7.5-8.2 km/h (0.7 km/h)** — la stessa identica configurazione reale della corsa 2026-09-13, già citata in questo documento.
+- **Ampiezza di oscillazione: picco-picco ~2.2 km/h** (7.19-9.38 km/h), presa dall'unico estratto concreto per-secondo che il documento di validazione 2026-09-13 riporta (una singola fase RUN di 70s, righe 66-80 di quel documento) — non è un dato per-tick completo di quella corsa (non esiste, P1 non esisteva ancora), ma è l'unica ricostruzione concreta disponibile, e va usata onestamente come tale nel commento del test, non spacciata per un replay di dati reali.
+- **Periodo di oscillazione: breve, indicativamente 6-8s per ciclo completo**, scelto per essere coerente con la durata mediana di un episodio `GOOD` confermato in quella corsa (3.0s, citata nello stesso documento) — un ciclo che attraversa entrambi i bordi della banda in pochi secondi, abbastanza per produrre ripetuti flip diretti TOO_SLOW↔TOO_FAST senza smoothing, come osservato realmente (25 flip diretti).
+- **Cadenza di campionamento: ~1Hz**, coerente con la cadenza reale dei fix GPS usati altrove in questo progetto e nei test di `SpeedEstimator`.
+
+**Cosa il test deve verificare programmaticamente**, alimentando la stessa traiettoria sintetica sia direttamente a `PaceEvaluator` (baseline, nessuno smoothing) sia attraverso `EmaPaceSmoother(timeConstantSeconds = 6.0)` prima di `PaceEvaluator` (con smoothing):
+
+1. **Il conteggio di flip diretti confermati `TOO_SLOW`↔`TOO_FAST`** cala in modo sostanziale con lo smoothing rispetto al baseline (il baseline, su questi parametri, deve riprodurre un comportamento di flapping ripetuto simile a quello osservato realmente — se non lo fa, i parametri sintetici vanno rivisti prima di trarre conclusioni su τ).
+2. **Il lag di decisione introdotto resta limitato**, non degenera in un'unresponsività pratica: es. tempo dal momento in cui la traiettoria sintetica entra stabilmente in una nuova banda (es. un vero cambio di sforzo sostenuto, non un'oscillazione) al momento in cui `PaceEvaluator` conferma lo stato corrispondente, con smoothing attivo, resta entro un limite esplicito da fissare nel task di implementazione (es. qualche secondo oltre al lag già intrinseco del debounce `confirmationSamples`, non decine di secondi).
+
+**Onestà esplicita:** questo test non sostituisce la validazione su corsa reale a banda stretta (Decisione 1, Domande aperte) — verifica che τ=6.0s si comporti ragionevolmente su un'approssimazione ragionata del caso peggiore, non sulla corsa 2026-09-13 originale, per cui non esistono dati per-tick.
+
+### 8.2 — Analisi di sensitività su τ (stesso log reale 2026-09-15)
+
+**Obiettivo:** verificare se la conclusione (τ≈6-7s) è stabile su un intervallo ragionevole di valori candidati, o se è fragile — nel qual caso saperlo è importante quanto il valore stesso.
+
+**Onestà esplicita sul metodo, necessaria prima della tabella:** il log 2026-09-15 non contiene un flusso denso per-tick della velocità grezza (`LocationFixEvent` non porta `speedKmh`; solo `PaceStateConfirmedEvent`/`AudioCueEmittedEvent`, sparsi nel tempo, la portano) — è esattamente il gap che l'aggiunta di `rawSpeedKmh` (Decisione 6) risolve **per la prossima corsa**, non per questa. Una vera riproduzione tick-per-tick della formula EMA su dati storici non è quindi possibile su questo log. L'analisi di sensitività qui descritta è perciò una **stima approssimata per proxy**, non una simulazione esatta: usa gli n=130 intervalli già calcolati tra cambi di stato confermato consecutivi (Decisione 1) come proxy della durata di ogni escursione, e classifica un'escursione come "probabilmente smorzata" da un dato τ se la sua durata è più breve di τ (un'EMA con costante di tempo τ non ha il tempo di inseguire un'oscillazione più corta di τ fino a farla confermare come stato opposto) — un'euristica ragionevole, non un calcolo esatto sull'ampiezza reale del segnale.
+
+**Tabella illustrativa, calcolata per questo documento sugli stessi n=130 intervalli di Decisione 1 (variante con l'ultimo intervallo RUN chiuso al log — vedi nota metodologica) — da riprodurre/raffinare come parte del task di implementazione P2, non un risultato finale:**
+
+| τ candidato | Escursioni smorzate (durata < τ, su 130) | Escursioni che sopravvivono (durata ≥ τ) | Lag di assestamento implicito (~3τ, Decisione 2) |
+|---|---|---|---|
+| 4s | 42 (32%) | 88 (68%) | 12s |
+| 6s | 61 (47%) | 69 (53%) | 18s |
+| 8s | 83 (64%) | 47 (36%) | 24s |
+| 10s | 101 (78%) | 29 (22%) | 30s |
+
+**Lettura esplicita:** la frazione di escursioni smorzate cresce in modo continuo e senza discontinuità evidenti tra 4s e 10s — nessun "gomito" nella curva che indichi un valore chiaramente corretto o chiaramente sbagliato in questo intervallo. Questo è di per sé un'evidenza indipendente a favore della conclusione già dichiarata (τ nell'intervallo 6-7s è una scelta ragionevole, non fragile): spostarsi di qualche secondo in una direzione o nell'altra cambia il risultato gradualmente, non lo ribalta. Il costo del compromesso è visibile nella terza colonna: a τ=10s quasi 4 escursioni su 5 verrebbero smorzate, ma al prezzo di un lag di assestamento di 30s — probabilmente eccessivo per rispondere a un vero cambio di sforzo. Il task di implementazione deve rieseguire questa analisi (idealmente con dati per-tick reali dopo la prossima corsa con `rawSpeedKmh`, non solo con questo proxy) e riportare la stessa tabella con numeri aggiornati.
 
 ## Non-obiettivi espliciti
 
@@ -307,7 +389,7 @@ I tre momenti in cui `paceSmoother.purge()` scatta (Decisione 4) sono **già tut
 
 ## Domande aperte per il proprietario
 
-1. **τ = 6.0s è una stima di partenza da un solo run** (banda RUN 1.5 km/h, non la banda 0.7 km/h che ha originariamente motivato l'indagine) — va validata sulla prossima corsa reale, specialmente se registrata con una banda più stretta, dove il ciclo di oscillazione naturale potrebbe essere più breve.
+1. **τ = 6.0s è una stima di partenza da un solo run, in un regime già attenuato** (banda RUN 1.5 km/h, più del doppio della banda 0.7 km/h che ha originariamente motivato l'indagine) — va validata sulla prossima corsa reale, specialmente se registrata con una banda più stretta, dove il ciclo di oscillazione naturale potrebbe essere più breve. Decisione 8 aggiunge un test sintetico del caso peggiore e un'analisi di sensitività **come parte di P2, prima** della prossima corsa, per alzare la fiducia in τ nel frattempo — non sostituiscono la validazione su dati reali a banda stretta, la anticipano.
 2. **Il purge anticipato di Decisione 4.2 è un'ipotesi causale plausibile ma non verificata** — nessun dato oggi conferma che i corridori reali comincino davvero a cambiare ritmo durante il countdown di 10s piuttosto che esattamente al cambio fase. Da verificare sulla prossima corsa (confrontando `rawSpeedKmh` nei secondi immediatamente precedenti e seguenti ogni `RoutinePhaseChangedEvent`); se smentita, rimuovere il trigger è una modifica di una riga.
 3. **Nessun secondo log eventi reale esiste ancora** (vedi nota in Contesto) — questo documento non ha potuto fare il confronto multi-corsa che l'idea originale del brief presupponeva. Non blocca l'implementazione (τ resta una costante rivedibile), ma va segnalato per non sovrastimare la solidità della stima.
 
@@ -320,7 +402,10 @@ I tre momenti in cui `paceSmoother.purge()` scatta (Decisione 4) sono **già tut
 - `app/src/main/java/dev/fred/pacorun/location/LocationSample.kt` (branch `feature/session-event-logging`)
 - `app/src/main/java/dev/fred/pacorun/audio/CuePlayer.kt` (`AudioCue`, per confermare che `WALK_IN_TEN`/`RUN_IN_TEN` sopravvivono al mapping `RoutineCue→AudioCue`)
 - `app/src/main/java/dev/fred/pacorun/settings/RunPreferences.kt` (default `runSeconds=60`/`walkSeconds=120`, per verificare che la corsa analizzata usasse la configurazione di default)
-- `/home/fredworkstation/Downloads/paco-run-2026-09-15-110804-events.jsonl` (log eventi reale P1, 7346 righe, analizzato con lo script Python di Decisione 1)
+- `app/src/main/java/dev/fred/pacorun/eventlog/SessionEventWriter.kt` (branch `feature/session-event-logging`) — **aggiunto in questa revisione**: il serializzatore JSON scritto a mano di P1, non basato su reflection; letto per verificare che `paceStateConfirmedEvent()` serializzi davvero ogni campo dichiarato sulla data class, e per la gap del cambiamento di schema in Decisione 6
+- `app/src/main/java/dev/fred/pacorun/eventlog/SessionEvent.kt` (branch `feature/session-event-logging`) — **aggiunto in questa revisione**: per l'ordine reale dei parametri del costruttore di `PaceStateConfirmedEvent`
+- `app/src/test/java/dev/fred/pacorun/pace/PaceEvaluatorTest.kt`, `app/src/test/java/dev/fred/pacorun/eventlog/SessionEventWriterTest.kt`, `app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt` (branch `feature/session-event-logging`) — **aggiunti in questa revisione**: per i tre punti di rottura reali nei test elencati in Decisione 6
+- `/home/fredworkstation/Downloads/paco-run-2026-09-15-110804-events.jsonl` (log eventi reale P1, 7346 righe, analizzato con uno script Python — analisi rieseguita indipendentemente in questa revisione per verificare tutti i numeri di Decisione 1)
 
 **Documenti interni di riferimento (letti per intero prima di questo, non riprodotti qui):**
 - `docs/superpowers/specs/2026-09-13-precision-and-cue-stability-research.md`
