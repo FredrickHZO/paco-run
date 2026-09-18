@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.asin
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -203,6 +204,13 @@ interface SessionPaceEvaluator {
 interface SessionSpeedEngine {
     fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double
     fun breakChain(): Double
+}
+
+interface SessionPaceSmoothingEngine {
+    /** Fuses a new raw speed reading into the smoothed value, returns the updated value. */
+    fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float
+    /** Discards all accumulated memory; the next [accept] restarts from scratch, from the raw value. */
+    fun purge()
 }
 
 class DopplerSpeedEngine : SessionSpeedEngine {
@@ -434,4 +442,48 @@ class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstima
         speedEstimator.accept(position, reliable)
 
     override fun breakChain(): Double = speedEstimator.breakChain()
+}
+
+/**
+ * Time-normalized exponential moving average smoothing PaceEvaluator's speed input, so that
+ * [timeConstantSeconds] means the same thing regardless of the actual gap between reliable fixes
+ * (which isn't perfectly uniform -- unreliable fixes intermittently interrupt the stream). Not a
+ * fixed-length sliding window -- mirrors the EMA mechanism SpeedEstimator already validates in
+ * production for its own innovation tracking, rather than inventing a second smoothing primitive.
+ *
+ * timeConstantSeconds=6.0: derived from real pace-decision data during RUN phases (median gap
+ * between consecutive confirmed pace-state changes: 6.5s across 130 samples, a single real run,
+ * 2026-09-15) -- see docs/superpowers/specs/2026-09-18-phase-aware-pace-smoothing-design.md,
+ * Decision 1, for the full distribution and this estimate's explicit limits (that run's RUN band
+ * was 1.5 km/h -- more than double the 0.7 km/h band of the run that originally motivated this
+ * work, so this estimate is likely on the generous side for a narrow-band run). A starting
+ * estimate to revalidate on the next real run, not a final value -- same discipline as
+ * SpeedEstimator's qHigh/innovationEmaAlpha, not a RunPreferences user setting.
+ */
+class EmaPaceSmoother(
+    private val timeConstantSeconds: Double = 6.0,
+) : SessionPaceSmoothingEngine {
+    private var smoothedKmh: Double? = null
+    private var lastElapsedRealtimeMillis: Long? = null
+
+    override fun accept(rawSpeedKmh: Float, elapsedRealtimeMillis: Long): Float {
+        val previousSmoothed = smoothedKmh
+        val previousElapsed = lastElapsedRealtimeMillis
+        lastElapsedRealtimeMillis = elapsedRealtimeMillis
+        if (previousSmoothed == null || previousElapsed == null) {
+            smoothedKmh = rawSpeedKmh.toDouble()
+            return rawSpeedKmh
+        }
+        val dtSeconds = (elapsedRealtimeMillis - previousElapsed) / 1_000.0
+        if (dtSeconds <= 0.0) return previousSmoothed.toFloat() // stale/duplicate tick, keep the previous value
+        val alpha = 1.0 - exp(-dtSeconds / timeConstantSeconds)
+        val next = alpha * rawSpeedKmh + (1.0 - alpha) * previousSmoothed
+        smoothedKmh = next
+        return next.toFloat()
+    }
+
+    override fun purge() {
+        smoothedKmh = null
+        lastElapsedRealtimeMillis = null
+    }
 }
