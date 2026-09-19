@@ -1072,19 +1072,30 @@ Add to `RobustOutlierRejectionTest.kt`:
         // Independent 20m outlier exactly at index 20, the first (exempt) post-burst fix.
         val withBurstAndOutlier = withInjectedOutlier(withBurst, index = 20, offsetMeters = 20.0)
 
+        // CORRECTED (found by the Task 5 implementer, same class of mistake as Task 4's plan bug
+        // -- a value read at the wrong moment, not the wrong logic): getLastPostBurstExemptionApplied()
+        // reflects only the MOST RECENT accept() call. The original version of this test read it
+        // AFTER the full 30-fix loop finished (i.e. reflecting fix 29, long since back to false),
+        // not at fix 20 where the exemption actually fires -- confirmed by a debug trace showing
+        // isFirstFixAfterBurst is true exactly once, at fix 20, exactly as intended. Fixed by
+        // capturing it inside the loop, at the same instant as speedAtExemptOutlier.
         val estimator = SpeedEstimator()
         var speedAtExemptOutlier = 0.0
+        var exemptionAppliedAtOutlier = false
         withBurstAndOutlier.forEachIndexed { i, fix ->
             val speed = estimator.accept(fix.position, reliable = true)
-            if (i == 20) speedAtExemptOutlier = speed
+            if (i == 20) {
+                speedAtExemptOutlier = speed
+                exemptionAppliedAtOutlier = estimator.getLastPostBurstExemptionApplied()
+            }
         }
 
         println(
             "costOfPostBurstExemptionOnAnIndependentAnomalyIsCharacterized: speed at the exempt " +
                 "fix with an independent 20m outlier injected was $speedAtExemptOutlier km/h " +
-                "(true speed 8 km/h) -- exemption applied: ${estimator.getLastPostBurstExemptionApplied()}",
+                "(true speed 8 km/h) -- exemption applied: $exemptionAppliedAtOutlier",
         )
-        assertTrue(estimator.getLastPostBurstExemptionApplied())
+        assertTrue(exemptionAppliedAtOutlier)
     }
 ```
 
