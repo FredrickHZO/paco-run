@@ -138,6 +138,14 @@ mapping from worktree folder name to branch name is *not* always identical
 - Other `feature/*` branches — isolated tracks for larger work-in-progress,
   merged back into `main` deliberately once ready, never folded in casually.
 
+**Close branches when their work is done — don't let them pile up.** Once a
+`feature/*` branch is merged into `main`, delete the branch and remove its
+worktree in the same sitting (ask first, since deleting is destructive — but
+propose it, don't just leave it). A branch existing only as unmerged history
+nobody intends to revisit defeats the point of using git for isolation in the
+first place; this was an explicit correction (2026-09-19) after branches were
+allowed to accumulate uncleaned.
+
 **Planned flow for future core-engine work once it resumes:** engine/pace
 changes are meant to land on their own short-lived `feature/*` branch
 forked from `main` (not directly on `main`, not directly on `feature/wear-os`),
