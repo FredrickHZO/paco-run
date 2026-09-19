@@ -47,7 +47,16 @@ data class LocationFixEvent(
     val satelliteCn0MaxDbHz: Float?,
     val qualityTier: QualityTier,
     val speedEstimatorDiagnostics: SpeedEstimatorDiagnostics?,
+    val satelliteGeometry: List<SatelliteGeometry> = emptyList(),
 ) : SessionEvent
+
+data class SatelliteGeometry(
+    val svid: Int,
+    val constellationType: Int,
+    val elevationDegrees: Float,
+    val azimuthDegrees: Float,
+    val usedInFix: Boolean,
+)
 
 enum class RejectionReason {
     MISSING_OR_INVALID_SPEED,

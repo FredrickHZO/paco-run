@@ -120,7 +120,8 @@ class SessionEventWriterTest {
                 "\"elapsedSinceStartMillis\":3000,\"provider\":\"gps\",\"reliable\":false," +
                 "\"rejectionReasons\":[\"SPEED_ACCURACY_TOO_HIGH\",\"FIX_TOO_OLD\"]," +
                 "\"satellitesUsedInFix\":6,\"satelliteCn0MinDbHz\":18.5,\"satelliteCn0AvgDbHz\":24.1," +
-                "\"satelliteCn0MaxDbHz\":30.0,\"qualityTier\":\"SCARSA\",\"speedEstimatorDiagnostics\":null}",
+                "\"satelliteCn0MaxDbHz\":30.0,\"qualityTier\":\"SCARSA\",\"speedEstimatorDiagnostics\":null," +
+                "\"satelliteGeometry\":[]}",
             SessionEventWriter.toJsonLine(event),
         )
     }
@@ -154,7 +155,8 @@ class SessionEventWriterTest {
                 "\"rejectionReasons\":[],\"satellitesUsedInFix\":null,\"satelliteCn0MinDbHz\":null," +
                 "\"satelliteCn0AvgDbHz\":null,\"satelliteCn0MaxDbHz\":null,\"qualityTier\":\"BUONA\"," +
                 "\"speedEstimatorDiagnostics\":{\"processNoiseRegime\":\"Q_HIGH\",\"accuracyGateEngaged\":true," +
-                "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0,\"postBurstExemptionApplied\":false}}",
+                "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0,\"postBurstExemptionApplied\":false}," +
+                "\"satelliteGeometry\":[]}",
             line,
         )
         assertEquals(false, line.contains("NaN"))
@@ -183,6 +185,53 @@ class SessionEventWriterTest {
         )
 
         assertTrue(SessionEventWriter.toJsonLine(event).contains("\"robustWeight\":0.42"))
+    }
+
+    @Test
+    fun locationFixEventSerializesPerSatelliteGeometryAsAGenuineList() {
+        val event = LocationFixEvent(
+            elapsedRealtimeMillis = 6_000L,
+            sequenceNumber = 7,
+            elapsedSinceStartMillis = 6_000L,
+            provider = "gps",
+            reliable = true,
+            rejectionReasons = emptyList(),
+            satellitesUsedInFix = 2,
+            satelliteCn0MinDbHz = null,
+            satelliteCn0AvgDbHz = null,
+            satelliteCn0MaxDbHz = null,
+            qualityTier = QualityTier.OTTIMA,
+            speedEstimatorDiagnostics = null,
+            satelliteGeometry = listOf(
+                SatelliteGeometry(svid = 12, constellationType = 1, elevationDegrees = 45.5f, azimuthDegrees = 180.0f, usedInFix = true),
+                SatelliteGeometry(svid = 5, constellationType = 3, elevationDegrees = 10.2f, azimuthDegrees = 270.0f, usedInFix = false),
+            ),
+        )
+
+        val json = SessionEventWriter.toJsonLine(event)
+        assertTrue(json.contains("\"satelliteGeometry\":[" +
+            "{\"svid\":12,\"constellationType\":1,\"elevationDegrees\":45.5,\"azimuthDegrees\":180.0,\"usedInFix\":true}," +
+            "{\"svid\":5,\"constellationType\":3,\"elevationDegrees\":10.2,\"azimuthDegrees\":270.0,\"usedInFix\":false}]"))
+    }
+
+    @Test
+    fun locationFixEventDefaultsSatelliteGeometryToEmptyList() {
+        val event = LocationFixEvent(
+            elapsedRealtimeMillis = 7_000L,
+            sequenceNumber = 8,
+            elapsedSinceStartMillis = 7_000L,
+            provider = "gps",
+            reliable = true,
+            rejectionReasons = emptyList(),
+            satellitesUsedInFix = null,
+            satelliteCn0MinDbHz = null,
+            satelliteCn0AvgDbHz = null,
+            satelliteCn0MaxDbHz = null,
+            qualityTier = QualityTier.OTTIMA,
+            speedEstimatorDiagnostics = null,
+        )
+
+        assertTrue(SessionEventWriter.toJsonLine(event).contains("\"satelliteGeometry\":[]"))
     }
 
     @Test

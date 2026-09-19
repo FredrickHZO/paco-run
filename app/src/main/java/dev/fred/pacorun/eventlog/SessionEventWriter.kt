@@ -83,6 +83,7 @@ object SessionEventWriter {
         floatOrNull("satelliteCn0MaxDbHz", event.satelliteCn0MaxDbHz)
         enum("qualityTier", event.qualityTier)
         raw("speedEstimatorDiagnostics", event.speedEstimatorDiagnostics?.let(::speedEstimatorDiagnostics))
+        objectArray("satelliteGeometry", event.satelliteGeometry, ::satelliteGeometry)
     }
 
     private fun speedEstimatorDiagnostics(diagnostics: SpeedEstimatorDiagnostics) = json {
@@ -91,6 +92,20 @@ object SessionEventWriter {
         double("innovationEmaMagnitude", diagnostics.innovationEmaMagnitude)
         double("robustWeight", diagnostics.robustWeight)
         boolean("postBurstExemptionApplied", diagnostics.postBurstExemptionApplied)
+    }
+
+    private fun satelliteGeometry(satellite: SatelliteGeometry) = json {
+        int("svid", satellite.svid)
+        int("constellationType", satellite.constellationType)
+        // floatOrNull (not double + .toDouble()) deliberately -- a Float->Double cast carries the
+        // source Float's own binary rounding artifact into the JSON (see runPreferences() above
+        // in this same file for the identical, already-documented reasoning: 0.6f becomes
+        // 0.6000000238418579 if cast to Double first). floatOrNull accepts these non-null Floats
+        // fine (Float is a subtype of Float?) and calls .toString() directly on the Float, which
+        // prints the clean decimal the value actually displays.
+        floatOrNull("elevationDegrees", satellite.elevationDegrees)
+        floatOrNull("azimuthDegrees", satellite.azimuthDegrees)
+        boolean("usedInFix", satellite.usedInFix)
     }
 
     private fun gpsSilentGapEvent(event: GpsSilentGapEvent) = json {
@@ -204,6 +219,8 @@ private class JsonObjectBuilder {
     fun enumOrNull(name: String, value: Enum<*>?) = raw(name, value?.let { "\"${it.name}\"" })
     fun stringArray(name: String, values: List<String>) =
         raw(name, values.joinToString(",", "[", "]") { "\"${it.escapeJson()}\"" })
+    fun <T> objectArray(name: String, values: List<T>, toJson: (T) -> String) =
+        raw(name, values.joinToString(",", "[", "]", transform = toJson))
 
     fun raw(name: String, jsonValue: String?) {
         fields += "\"$name\":${jsonValue ?: "null"}"
