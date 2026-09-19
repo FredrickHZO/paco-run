@@ -541,6 +541,28 @@ class SpeedEstimatorTest {
         assertEquals(false, estimator.getLastAcceptWasMeasurement())
     }
 
+    @Test
+    fun fiveFixSequenceProducesKnownSpeedSequence() {
+        // Locked-in output of the CURRENT (pre-refactor) update() on this exact input -- computed
+        // by hand-simulating AxisKalman's exact recursion (predict + update, default constructor
+        // constants, DEFAULT_HORIZONTAL_ACCURACY_METERS=10f since no accuracy is given) outside
+        // this test, not invented. If Task 1's refactor changes this, the refactor changed
+        // behavior -- stop and find out why before continuing.
+        val estimator = SpeedEstimator()
+        val speeds = listOf(
+            estimator.accept(fix(45.0, 9.0, 0L), reliable = true),
+            estimator.accept(fix(45.0001, 9.0, 1_000L), reliable = true),
+            estimator.accept(fix(45.0002, 9.0, 2_000L), reliable = true),
+            estimator.accept(fix(45.0003, 9.0, 3_000L), reliable = true),
+            estimator.accept(fix(45.0004, 9.0, 4_000L), reliable = true),
+        )
+        assertEquals(0.0, speeds[0], 1e-9)
+        assertEquals(4.461044704636316, speeds[1], 1e-6)
+        assertEquals(13.399918853039797, speeds[2], 1e-6)
+        assertEquals(22.346734105469604, speeds[3], 1e-6)
+        assertEquals(28.806939552343792, speeds[4], 1e-6)
+    }
+
     private fun fix(latitude: Double, longitude: Double, elapsedMillis: Long, horizontalAccuracyMeters: Float? = null) =
         LocationPosition(latitude, longitude, elapsedMillis, horizontalAccuracyMeters)
 }

@@ -53,7 +53,12 @@ class SpeedEstimator(
     private class AxisKalman(initialPosition: Double) {
         var position: Double = initialPosition
         var velocity: Double = 0.0
-        /** Signed normalized innovation from the most recent [update] call -- see class-level comment. */
+        /** Signed normalized innovation from the most recent [apply] call, computed from the RAW
+         * (un-inflated) measurement variance by [peekSignedNormalizedInnovation] -- see the G6
+         * design doc, "Cosa succede all'EMA di innovazione". This is deliberately NOT recomputed
+         * with the weight-inflated variance: the regime-switch EMA that consumes this value must
+         * see the real observed signal, not a version already discounted by G6's own robustness
+         * adjustment, or the two mechanisms would be entangled instead of independent. */
         var lastSignedNormalizedInnovation: Double = 0.0
             private set
         private var p00: Double = INITIAL_POSITION_VARIANCE
@@ -73,13 +78,25 @@ class SpeedEstimator(
             p00 = newP00; p01 = newP01; p10 = newP10; p11 = newP11
         }
 
-        /** Returns the normalized innovation |residual| / sqrt(innovation variance), used to detect real accelerations. */
-        fun update(measurement: Double, measurementVariance: Double): Double {
+        /** Raw signed normalized innovation using the given (un-inflated) [measurementVariance],
+         * without mutating any state. Must be called on BOTH axes, using each axis's own current
+         * [p00], before either axis's [apply] runs -- G6's joint weight needs both raw residuals
+         * to compute its shared statistic. */
+        fun peekSignedNormalizedInnovation(measurement: Double, measurementVariance: Double): Double {
             val innovation = measurement - position
             val innovationVariance = p00 + measurementVariance
-            val signedNormalizedInnovation = innovation / sqrt(innovationVariance)
-            lastSignedNormalizedInnovation = signedNormalizedInnovation
-            val normalizedInnovation = kotlin.math.abs(signedNormalizedInnovation)
+            return innovation / sqrt(innovationVariance)
+        }
+
+        /** Applies the real Kalman update using [effectiveMeasurementVariance] -- which may already
+         * be inflated by 1/weight upstream in [SpeedEstimator.accept] -- for BOTH the gain and the
+         * covariance update, so the filter's own confidence always matches what it actually did
+         * (hard rule 12: never scale only the state correction and leave the covariance as if the
+         * fix had been fully trusted). Records [rawSignedNormalizedInnovation] (from the peek
+         * step, NOT recomputed here) as [lastSignedNormalizedInnovation]. */
+        fun apply(measurement: Double, effectiveMeasurementVariance: Double, rawSignedNormalizedInnovation: Double) {
+            val innovation = measurement - position
+            val innovationVariance = p00 + effectiveMeasurementVariance
             val k0 = p00 / innovationVariance
             val k1 = p10 / innovationVariance
             position += k0 * innovation
@@ -89,7 +106,7 @@ class SpeedEstimator(
             val newP10 = p10 - k1 * p00
             val newP11 = p11 - k1 * p01
             p00 = newP00; p01 = newP01; p10 = newP10; p11 = newP11
-            return normalizedInnovation
+            lastSignedNormalizedInnovation = rawSignedNormalizedInnovation
         }
 
         private companion object {
@@ -184,8 +201,12 @@ class SpeedEstimator(
         north.predict(dtSeconds, processNoise)
 
         val measurementVariance = accuracyMeters.pow(2)
-        east.update(x, measurementVariance)
-        north.update(y, measurementVariance)
+        val eastRawInnovation = east.peekSignedNormalizedInnovation(x, measurementVariance)
+        val northRawInnovation = north.peekSignedNormalizedInnovation(y, measurementVariance)
+        // TODO(Task 2): replace this hardcoded 1.0 with the real joint robust weight.
+        val effectiveMeasurementVariance = measurementVariance / 1.0
+        east.apply(x, effectiveMeasurementVariance, eastRawInnovation)
+        north.apply(y, effectiveMeasurementVariance, northRawInnovation)
         if (!accuracyDegraded) {
             eastInnovationEma = innovationEmaAlpha * east.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * eastInnovationEma
             northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
