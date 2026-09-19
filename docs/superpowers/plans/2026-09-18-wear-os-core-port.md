@@ -308,6 +308,13 @@ cp app/src/main/java/dev/fred/pacorun/routine/RoutineEngine.kt wear/src/main/jav
 cp app/src/main/java/dev/fred/pacorun/routine/RoutineModels.kt wear/src/main/java/dev/fred/pacorun/routine/
 
 cp app/src/main/java/dev/fred/pacorun/location/LocationSampleMapper.kt wear/src/main/java/dev/fred/pacorun/location/
+# Added 2026-09-19, found real during Task 2: LocationSample.kt is the type LocationSampleMapper.map()
+# returns, defined in its own file -- this plan's claim that engine imports "resolve entirely within
+# this file set" was wrong without it. Confirmed by the implementer, by an independent reviewer, and
+# by the project owner's own subagent (grep across the copied set + a successful compileDebugKotlin
+# after removing it as a sanity check). NOT the same as LocationReadiness.kt, which the spec
+# explicitly excludes and which this plan never listed -- do not confuse the two if re-deriving this list.
+cp app/src/main/java/dev/fred/pacorun/location/LocationSample.kt wear/src/main/java/dev/fred/pacorun/location/
 
 cp app/src/main/java/dev/fred/pacorun/eventlog/SessionEvent.kt wear/src/main/java/dev/fred/pacorun/eventlog/
 cp app/src/main/java/dev/fred/pacorun/eventlog/SessionEventWriter.kt wear/src/main/java/dev/fred/pacorun/eventlog/
