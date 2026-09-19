@@ -224,7 +224,14 @@ class SpeedEstimator(
         val effectiveMeasurementVariance = measurementVariance / jointRobustWeight
         east.apply(x, effectiveMeasurementVariance, eastRawInnovation)
         north.apply(y, effectiveMeasurementVariance, northRawInnovation)
-        if (!accuracyDegraded) {
+        // G6 adds a SECOND, OR-combined exclusion trigger -- it never replaces accuracyDegraded's
+        // own unconditional exclusion. Two rounds of adversarial review on the design doc found
+        // that treating this as a substitution (either "G6 replaces G7 entirely" or "G6's weight
+        // replaces just this exclusion") would stop excluding exactly the degraded-but-not-
+        // residual-anomalous fixes this unconditional check exists to catch. Both criteria must
+        // stay independently sufficient to trigger exclusion.
+        val excludedFromEma = accuracyDegraded || jointRobustWeight < emaExclusionWeightThreshold
+        if (!excludedFromEma) {
             eastInnovationEma = innovationEmaAlpha * east.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * eastInnovationEma
             northInnovationEma = innovationEmaAlpha * north.lastSignedNormalizedInnovation + (1 - innovationEmaAlpha) * northInnovationEma
         }

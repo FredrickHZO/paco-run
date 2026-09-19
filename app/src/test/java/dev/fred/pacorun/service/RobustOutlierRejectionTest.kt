@@ -1,5 +1,6 @@
 package dev.fred.pacorun.service
 
+import dev.fred.pacorun.eventlog.ProcessNoiseRegime
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -20,6 +21,18 @@ class RobustOutlierRejectionTest {
                 position = target.position.copy(latitude = shiftedLatitude),
             )
         }
+    }
+
+    /** Builds a trajectory where fixes [degradedRange] have inflated declared accuracy (a
+     * "degraded GPS" burst), everything else uses [normalAccuracyMeters]. */
+    private fun withDegradedAccuracyBurst(
+        fixes: List<SyntheticTrajectory.Fix>,
+        degradedRange: IntRange,
+        normalAccuracyMeters: Float,
+        degradedAccuracyMeters: Float,
+    ): List<SyntheticTrajectory.Fix> = fixes.mapIndexed { i, fix ->
+        val accuracy = if (i in degradedRange) degradedAccuracyMeters else normalAccuracyMeters
+        fix.copy(position = fix.position.copy(horizontalAccuracyMeters = accuracy))
     }
 
     @Test
@@ -65,5 +78,51 @@ class RobustOutlierRejectionTest {
         }
         val meanWeight = weights.average()
         assertTrue("expected mean robust weight close to 1.0 on ordinary noise, was $meanWeight", meanWeight > 0.9)
+    }
+
+    @Test
+    fun regimeStaysQLowDuringDegradedBurstEvenWithG6Active() {
+        val fixes = SyntheticTrajectory.generate(
+            speedProfileKmh = listOf(90.0 to 8.0),
+            noiseStdMeters = 3.0,
+            seed = 11L,
+        )
+        val withBurst = withDegradedAccuracyBurst(fixes, degradedRange = 20..40, normalAccuracyMeters = 3.0f, degradedAccuracyMeters = 25.0f)
+
+        val estimator = SpeedEstimator()
+        withBurst.take(20).forEach { estimator.accept(it.position, reliable = true) } // warm up before the burst
+        val regimesDuringBurst = withBurst.subList(20, 41).map {
+            estimator.accept(it.position, reliable = true)
+            estimator.getLastProcessNoiseRegime()
+        }
+
+        assertTrue(
+            "expected every fix during the degraded burst to stay in Q_LOW, saw: $regimesDuringBurst",
+            regimesDuringBurst.all { it == ProcessNoiseRegime.Q_LOW },
+        )
+    }
+
+    @Test
+    fun emaNotContaminatedImmediatelyAfterBurstEnds() {
+        val fixes = SyntheticTrajectory.generate(
+            speedProfileKmh = listOf(90.0 to 8.0),
+            noiseStdMeters = 3.0,
+            seed = 11L,
+        )
+        val withBurst = withDegradedAccuracyBurst(fixes, degradedRange = 20..40, normalAccuracyMeters = 3.0f, degradedAccuracyMeters = 25.0f)
+
+        val estimator = SpeedEstimator()
+        withBurst.take(41).forEach { estimator.accept(it.position, reliable = true) } // through the burst
+        // Immediately after: a handful of clean, steady-state fixes at unchanged true speed.
+        val regimesAfterBurst = withBurst.subList(41, 51).map {
+            estimator.accept(it.position, reliable = true)
+            estimator.getLastProcessNoiseRegime()
+        }
+
+        assertTrue(
+            "expected the EMA to have been protected during the burst, so the first clean fixes " +
+                "after it don't spuriously read as a real acceleration (Q_HIGH) at unchanged speed; saw: $regimesAfterBurst",
+            regimesAfterBurst.count { it == ProcessNoiseRegime.Q_HIGH } == 0,
+        )
     }
 }
