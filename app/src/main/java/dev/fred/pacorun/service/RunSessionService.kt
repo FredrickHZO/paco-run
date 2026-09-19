@@ -359,6 +359,7 @@ class RunSessionService : Service() {
                         accuracyGateEngaged = estimator.getLastAccuracyGateEngaged(),
                         innovationEmaMagnitude = estimator.getLastInnovationEma(),
                         robustWeight = estimator.getLastRobustWeight(),
+                        postBurstExemptionApplied = estimator.getLastPostBurstExemptionApplied(),
                     )
                 } else {
                     null

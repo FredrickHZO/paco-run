@@ -90,6 +90,7 @@ object SessionEventWriter {
         boolean("accuracyGateEngaged", diagnostics.accuracyGateEngaged)
         double("innovationEmaMagnitude", diagnostics.innovationEmaMagnitude)
         double("robustWeight", diagnostics.robustWeight)
+        boolean("postBurstExemptionApplied", diagnostics.postBurstExemptionApplied)
     }
 
     private fun gpsSilentGapEvent(event: GpsSilentGapEvent) = json {

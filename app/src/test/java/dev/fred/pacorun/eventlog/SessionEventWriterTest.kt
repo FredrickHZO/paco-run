@@ -154,7 +154,7 @@ class SessionEventWriterTest {
                 "\"rejectionReasons\":[],\"satellitesUsedInFix\":null,\"satelliteCn0MinDbHz\":null," +
                 "\"satelliteCn0AvgDbHz\":null,\"satelliteCn0MaxDbHz\":null,\"qualityTier\":\"BUONA\"," +
                 "\"speedEstimatorDiagnostics\":{\"processNoiseRegime\":\"Q_HIGH\",\"accuracyGateEngaged\":true," +
-                "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0}}",
+                "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0,\"postBurstExemptionApplied\":false}}",
             line,
         )
         assertEquals(false, line.contains("NaN"))

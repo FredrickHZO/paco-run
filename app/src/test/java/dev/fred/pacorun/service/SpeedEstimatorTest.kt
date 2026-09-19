@@ -4,6 +4,7 @@ import java.util.Random
 import kotlin.math.abs
 import kotlin.math.cos
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,6 +79,14 @@ class SpeedEstimatorTest {
         // After the reset, this behaves like a fresh first fix -- no speed yet, not a huge
         // jump computed against the pre-reset state.
         assertEquals(0.0, estimator.accept(fix(0.0, .0001, 1_000L), reliable = true), .001)
+    }
+
+    @Test
+    fun breakChainResetsAccuracyGateEngagedFlag() {
+        val estimator = SpeedEstimator()
+        estimator.accept(fix(45.0, 9.0, 0L), reliable = true)
+        estimator.accept(fix(0.0, 0.0, 1_000L), reliable = false) // forces breakChain() via the unreliable path
+        assertFalse(estimator.getLastAccuracyGateEngaged())
     }
 
     @Test

@@ -143,6 +143,7 @@ class SpeedEstimator(
     private var accuracyBaselineMeters: Double? = null
     private var lastAccuracyGateEngaged: Boolean = false
     private var lastRobustWeight: Double = 1.0
+    private var lastPostBurstExemptionApplied: Boolean = false
     // False whenever the last accept() returned without performing a real Kalman update (first
     // fix of a chain, or any breakChain() path): in those cases lastProcessNoise /
     // lastAccuracyGateEngaged still hold an earlier fix's values, so a caller reporting them as
@@ -154,6 +155,7 @@ class SpeedEstimator(
     internal fun getLastProcessNoise(): Double = lastProcessNoise
     internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
     internal fun getLastRobustWeight(): Double = lastRobustWeight
+    internal fun getLastPostBurstExemptionApplied(): Boolean = lastPostBurstExemptionApplied
     internal fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
         if (lastProcessNoise == qHigh) ProcessNoiseRegime.Q_HIGH else ProcessNoiseRegime.Q_LOW
     internal fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
@@ -198,7 +200,15 @@ class SpeedEstimator(
         // fix's accuracy.
         val accuracyBaseline = accuracyBaselineMeters ?: accuracyMeters
         val accuracyDegraded = accuracyMeters > accuracyBaseline * accuracyDegradationRatio
+        // G6 post-burst exemption: MUST capture the PREVIOUS fix's value before the next line
+        // overwrites it. Reading lastAccuracyGateEngaged any later in this function (e.g. near
+        // where the robust weight is computed) would read the value THIS line already set to the
+        // CURRENT fix's accuracyDegraded -- making the exemption check permanently
+        // `accuracyDegraded && !accuracyDegraded`, always false, a silent no-op. Found in the
+        // design doc's fourth adversarial review round.
+        val previousAccuracyGateEngaged = lastAccuracyGateEngaged
         lastAccuracyGateEngaged = accuracyDegraded
+        val isFirstFixAfterBurst = previousAccuracyGateEngaged && !accuracyDegraded
 
         val processNoise = if (accuracyDegraded) {
             qLow
@@ -216,11 +226,14 @@ class SpeedEstimator(
         val eastRawInnovation = east.peekSignedNormalizedInnovation(x, measurementVariance)
         val northRawInnovation = north.peekSignedNormalizedInnovation(y, measurementVariance)
         val jointD2 = eastRawInnovation.pow(2) + northRawInnovation.pow(2)
-        // Named jointRobustWeight, not robustWeight, specifically to avoid shadowing the
-        // robustWeight(jointD2) FUNCTION with a local val of the same simple name -- confusing to
-        // read even where Kotlin would resolve it unambiguously.
-        val jointRobustWeight = robustWeight(jointD2)
+        // Structural exemption, not a tuned threshold: the fix right after a resolved degraded-
+        // accuracy burst can show a large, LEGITIMATE catch-up residual (the filter under-reacted
+        // on purpose during the burst) that is indistinguishable from a genuine spatial outlier by
+        // magnitude alone. We know deterministically when this is the case, so we skip the
+        // magnitude test entirely for this one fix rather than guessing a wider threshold.
+        val jointRobustWeight = if (isFirstFixAfterBurst) 1.0 else robustWeight(jointD2)
         lastRobustWeight = jointRobustWeight
+        lastPostBurstExemptionApplied = isFirstFixAfterBurst
         val effectiveMeasurementVariance = measurementVariance / jointRobustWeight
         east.apply(x, effectiveMeasurementVariance, eastRawInnovation)
         north.apply(y, effectiveMeasurementVariance, northRawInnovation)
@@ -253,6 +266,11 @@ class SpeedEstimator(
         eastInnovationEma = 0.0
         northInnovationEma = 0.0
         accuracyBaselineMeters = null
+        // A fresh chain must never inherit "just recovered from a burst" state from an unrelated
+        // prior chain -- see the post-burst exemption's comment above accept(). This field was
+        // previously write-only (only read by the internal test/diagnostics accessor), so this
+        // reset was never needed before G6 added an actual internal read of it.
+        lastAccuracyGateEngaged = false
         lastAcceptWasMeasurement = false
         return 0.0
     }
