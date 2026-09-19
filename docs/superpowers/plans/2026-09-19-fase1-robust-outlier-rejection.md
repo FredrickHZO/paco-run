@@ -711,19 +711,40 @@ Add to `RobustOutlierRejectionTest.kt`:
 ```kotlin
     @Test
     fun firstFixAfterBurstIsExemptFromRobustWeightSuppression() {
-        // A burst, then a real, sudden acceleration exactly at recovery -- the kind of legitimate
-        // catch-up jump that would otherwise look identical to a spatial outlier to G6's weight.
+        // CORRECTED (found by the Task 4 implementer, not by the design doc's five review
+        // rounds): the original degradedRange (5..19, 15 fixes) was too long. accuracyBaselineMeters
+        // is a plain EMA that updates unconditionally even on degraded fixes (see the existing
+        // "always update the baseline...so it tracks reality" comment in SpeedEstimator.kt) -- it
+        // chases the degraded value and, with these exact pre-existing G7 parameters
+        // (accuracyDegradationRatio=2.0, accuracyBaselineAlpha=0.05, normal=3.0m, degraded=25.0m),
+        // crosses the ratio threshold and self-disengages accuracyDegraded after exactly 12
+        // degraded fixes -- verified by direct simulation, deterministic regardless of seed
+        // (accuracy values don't depend on position noise). A 15-fix declared range silently
+        // stopped being "degraded" 3 fixes before the test's own indices assumed it still was.
+        // 12 fixes is the longest range that stays degraded for its ENTIRE declared length given
+        // these exact parameters -- do not lengthen it without re-deriving this number.
+        //
+        // Also verified by the same simulation: with qLow's deliberately conservative process
+        // noise, 12 fixes of suppressed reaction do NOT build up enough position uncertainty for
+        // even a large speed jump (checked up to 60 km/h) to cross G6's own dampening threshold —
+        // this specific scenario's catch-up residual would be ~1.0 weight even WITHOUT the
+        // exemption. So this test verifies the exemption fires at the structurally correct fix
+        // (the assertion that matters, and where the critical read-after-overwrite trap would
+        // hide), not that it prevents a dramatic real-world consequence here -- that demonstration
+        // is Task 5's costOfPostBurstExemptionOnAnIndependentAnomalyIsCharacterized test, which
+        // uses a deliberately large, independent anomaly instead of relying on catch-up magnitude.
         val fixes = SyntheticTrajectory.generate(
-            speedProfileKmh = listOf(20.0 to 8.0, 20.0 to 16.0),
+            // Speed changes at index 5, exactly where the burst starts (not mid-burst as before) --
+            // aligns the "real motion during suppression" scenario with the burst window itself.
+            speedProfileKmh = listOf(5.0 to 8.0, 30.0 to 16.0),
             noiseStdMeters = 3.0,
             seed = 5L,
         )
-        val withBurst = withDegradedAccuracyBurst(fixes, degradedRange = 5..19, normalAccuracyMeters = 3.0f, degradedAccuracyMeters = 25.0f)
+        val withBurst = withDegradedAccuracyBurst(fixes, degradedRange = 5..16, normalAccuracyMeters = 3.0f, degradedAccuracyMeters = 25.0f)
 
         val estimator = SpeedEstimator()
-        withBurst.take(19).forEach { estimator.accept(it.position, reliable = true) } // through the burst (indices 0-18)
-        estimator.accept(withBurst[19].position, reliable = true) // still degraded, last fix of the burst
-        estimator.accept(withBurst[20].position, reliable = true) // FIRST recovery fix, right where speed jumps 8->16
+        withBurst.take(17).forEach { estimator.accept(it.position, reliable = true) } // through the burst (indices 0-16)
+        estimator.accept(withBurst[17].position, reliable = true) // FIRST recovery fix, right after the true 8->16 jump
 
         assertTrue(
             "expected the first post-burst fix to be exempt from G6's weight test",
