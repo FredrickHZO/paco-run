@@ -40,7 +40,7 @@ Il meccanismo oggi in produzione contro le anomalie, `SpeedEstimator.kt` righe 1
 
 ### Principio
 
-Invece di un gate separato basato sui metadati (G7, da rimuovere — vedi sotto), si introduce una **reponderazione robusta basata sul residuo effettivo**: per ogni fix, si calcola quanto la posizione misurata si discosta da quella che il filtro si aspettava, e si usa quella discrepanza — non l'accuratezza dichiarata da Android — per decidere quanto fidarsi del fix.
+Si introduce una **reponderazione robusta basata sul residuo effettivo**, che affianca (non rimpiazza del tutto — vedi sotto) il gate G7 basato sui metadati: per ogni fix, si calcola quanto la posizione misurata si discosta da quella che il filtro si aspettava, e si usa quella discrepanza — non l'accuratezza dichiarata da Android — per decidere quanto fidarsi del fix nell'aggiornamento di posizione/velocità e nell'esclusione dalla EMA di innovazione.
 
 ### Perché una statistica congiunta sui due assi, non due pesi indipendenti
 
@@ -53,6 +53,8 @@ d² = (innovazione_est_normalizzata)² + (innovazione_nord_normalizzata)²
 ```
 
 dove ogni innovazione normalizzata è calcolata come oggi (`innovation / sqrt(p00 + measurementVariance)`), PRIMA che l'una o l'altra applichi il proprio aggiornamento. Sotto l'ipotesi "fix normale", `d²` segue una distribuzione chi-quadrato con 2 gradi di libertà — è la stessa identica quantità statistica che avrebbe usato G3 (RAIM) per un rigetto secco; G6 la usa per un peso continuo invece di un taglio netto, com'è già scritto nella roadmap ("G6 non sostituisce RAIM, ne è una versione più elegante").
+
+**Un rinforzo a questo argomento, e un costo onesto, trovati in review avversariale:** `eastAxis` e `northAxis` in questa implementazione ricevono sempre lo stesso `dt`, lo stesso `processNoise` e la stessa `measurementVariance` (scalare, non separata per asse) e partono dalla stessa varianza iniziale — quindi il loro `p00`/`p10` (e di conseguenza i loro guadagni `k0`/`k1`) sono **matematicamente identici ad ogni passo**, non solo "simili". Un peso condiviso non introduce quindi nessuna asimmetria nuova rispetto a come i due assi sono già trattati oggi. **Il costo onesto, da accettare consapevolmente e non da nascondere**: se l'anomalia è concentrata su un solo asse (es. un riflesso che sposta la posizione quasi solo in direzione est), il peso condiviso scredita leggermente anche il residuo dell'asse pulito (nord). Non separare i due casi è una scelta deliberata per restare dentro l'architettura attuale a due filtri indipendenti (separarli richiederebbe un filtro 2D unico con covarianza incrociata, un cambio strutturale più grande, fuori scope qui) — non una svista.
 
 ### Come si applica il peso senza rompere la coerenza matematica del filtro
 
@@ -75,11 +77,18 @@ dove `weight(d²)` è 1.0 per un fix normale e scende verso 0 per un fix anomalo
 
 `SpeedEstimator.accept()` orchestra: peek(est) + peek(nord) → calcola `d²` e il peso congiunto → apply(est, peso) + apply(nord, peso).
 
-### Cosa succede all'EMA di innovazione (qLow/qHigh) e al gate G7
+### Cosa succede all'EMA di innovazione (qLow/qHigh) e al gate G7 — CORRETTO dopo la review avversariale (2026-09-19)
 
-Oggi, un fix con `accuracyDegraded == true` viene escluso da `eastInnovationEma`/`northInnovationEma` (righe 189-192) — altrimenti un fix rumoroso per colpa dell'accuratezza degradata falserebbe il rilevatore di accelerazione reale.
+**Prima versione di questo documento, sbagliata, corretta qui:** la prima stesura diceva che G6 sostituisce interamente G7. Una review avversariale indipendente ha trovato che questo avrebbe reintrodotto un bug già risolto una volta. Il dettaglio, perché conta:
 
-**G6 sostituisce interamente questa logica**: un fix con peso robusto basso (outlier rilevato) viene escluso dalla stessa EMA, con lo stesso pattern già esistente — solo che il trigger è il residuo osservato, non il metadato di accuratezza. Il gate G7 (righe 165-172, il calcolo di `accuracyDegraded`/`accuracyBaselineMeters`) **viene rimosso**, non affiancato: un fix con accuratezza dichiarata scarsa produce quasi sempre anche un'innovazione anomala, quindi lo stesso meccanismo unificato copre già il suo lavoro, senza mantenere due gate paralleli da testare e capire nell'interazione reciproca.
+`accuracyDegraded` (righe 171-172 del file attuale) fa **due lavori distinti**, non uno:
+
+1. **Esclude il fix dalla EMA di innovazione** (righe 189-192) — così un'anomalia isolata non falsa il rilevatore di accelerazione reale.
+2. **Forza il regime `qLow` indipendentemente da cosa dice l'EMA** (righe 174-180) — questo è un lavoro diverso, e già una volta si è scoperto che è necessario: il commento originale in `SpeedEstimator.kt` (righe 30-40) documenta che una degradazione di accuratezza severa può produrre rumore che "assomiglia a un'accelerazione vera" per il rilevatore di innovazione, e uno sweep empirico su 5000 semi ha dimostrato che il rilevatore da solo NON protegge tutti i fix di una raffica degradata — motivo per cui questo secondo lavoro esiste.
+
+**Perché il peso di G6 non copre il lavoro (2):** il peso di G6 normalizza il residuo rispetto a `innovationVariance = p00 + measurementVariance` — una varianza già gonfiata dall'accuratezza scarsa. Un fix rumoroso "per colpa dell'accuratezza" produce quindi un residuo normalizzato che può risultare non-anomalo al test di G6 (il filtro si è già "aspettato" più rumore, quindi non lo segnala come outlier), pur essendo esattamente il tipo di rumore che il lavoro (2) doveva intercettare. Rimuovere G7 del tutto avrebbe rimosso questa protezione senza sostituirla.
+
+**Decisione corretta:** G6 sostituisce **solo il lavoro (1)** — l'esclusione dalla EMA usa il peso robusto di G6 (più preciso, perché reagisce al residuo osservato, non al metadato) invece del flag `accuracyDegraded`. **Il lavoro (2) resta**: il calcolo di `accuracyDegraded`/`accuracyBaselineMeters` e la sua capacità di forzare `qLow` **non vengono toccati né rimossi**. I due meccanismi diventano complementari, non ridondanti — proprio come si è scoperto per isteresi/debounce in P6: assi diversi dello stesso problema più ampio ("quanto fidarsi del GPS ora"), non due modi di fare la stessa cosa.
 
 `accuracyMeters` continua a determinare la `measurementVariance` di base — G6 agisce sopra quella base, non la sostituisce.
 
@@ -92,20 +101,25 @@ Oggi, un fix con `accuracyDegraded == true` viene escluso da `eastInnovationEma`
 
 1. **Test sintetico dedicato al buco specifico**: una traiettoria pulita con uno o più fix iniettati che abbiano *buona* accuratezza dichiarata ma posizione anomala — esattamente lo scenario che G7 non copre e G6 deve coprire. Verificare che il peso robusto lo rilevi e ne limiti l'influenza su posizione/velocità.
 2. **Non-regressione su rumore normale**: verificare che sul rumore GPS tipico (nessuna vera anomalia) il peso resti ≈1 e il comportamento sia indistinguibile da oggi.
-3. **Confronto sulla corsa reale registrata** (`paco-run-2026-09-15-110804-events.jsonl`, MAE baseline 0.242 km/h): verificare nessuna regressione. Nota onesta da riportare comunque nel piano: l'unica anomalia già trovata in quella corsa era legata a un'interruzione GPS (G14), non a un fix "accuratezza buona, posizione cattiva" — è plausibile che questo cambiamento non mostri alcun effetto visibile su QUESTA corsa specifica, il che sarebbe un risultato onesto da riportare, non un fallimento del test.
-4. **Verifica di autoconsistenza matematica** (hard rule 12): confermare per iscritto, prima di considerare l'implementazione finita, che l'aggiornamento della covarianza usa sempre la stessa varianza effettiva usata per il guadagno — nessuna scalatura post-hoc della sola correzione di stato.
+3. **Non-regressione sulla raffica di accuratezza degradata (il bug che G7(b) risolveva già una volta)**: ri-eseguire lo stesso tipo di test empirico già usato per validare `accuracyDegradationRatio`/`accuracyBaselineAlpha` (sweep su una raffica di accuratezza degradata simulata, più semi) e confermare che il regime resta `qLow` durante la raffica **esattamente come oggi** — questo test esiste già in una forma per la validazione originale del gate, va solo ri-eseguito per confermare che la modifica a (1) non ha, per qualche interazione inattesa, cambiato il comportamento di (2), che nel design qui sopra rimane intatto e non deve cambiare.
+4. **Confronto sulla corsa reale registrata** (`paco-run-2026-09-15-110804-events.jsonl`, MAE baseline 0.242 km/h): verificare nessuna regressione. Nota onesta da riportare comunque nel piano: l'unica anomalia già trovata in quella corsa era legata a un'interruzione GPS (G14), non a un fix "accuratezza buona, posizione cattiva" — è plausibile che questo cambiamento non mostri alcun effetto visibile su QUESTA corsa specifica, il che sarebbe un risultato onesto da riportare, non un fallimento del test.
+5. **Verifica di autoconsistenza matematica** (hard rule 12): confermare per iscritto, prima di considerare l'implementazione finita, che l'aggiornamento della covarianza usa sempre la stessa varianza effettiva usata per il guadagno — nessuna scalatura post-hoc della sola correzione di stato.
 
 ## Parte B — G9: logging elevazione/azimuth per satellite (nessun cambio al motore)
 
-### Cosa si aggiunge
+### Cosa si aggiunge — CORRETTO dopo la review avversariale (2026-09-19)
 
-`RunSessionService.kt` già registra un callback `GnssStatus.Callback` (righe 246-267) che oggi calcola solo CN0 min/media/max su tutti i satelliti visibili. Si estende per registrare, per ogni satellite riportato da `GnssStatus` in un fix:
+**Prima versione di questo documento, ambigua, corretta qui:** dicevo semplicemente di "estendere lo schema esistente" con elevazione/azimuth. La review avversariale ha trovato che questo si presta a due letture con conseguenze molto diverse: (a) aggregare elevazione/azimuth in min/media/max, seguendo esattamente il pattern già usato per il CN0 (righe 250-264 del file attuale) — più semplice, coerente con lo schema di oggi, **ma inutile per lo scopo dichiarato**: il calcolo del DOP richiede la geometria di OGNI satellite individualmente (per costruire la matrice di geometria), non statistiche riassuntive; oppure (b) un record vero per-satellite (elevazione, azimuth, `usedInFix` di CIASCUN satellite, non un riassunto) — l'unica forma che serve davvero al fine dichiarato.
 
+**Decisione: opzione (b).** `RunSessionService.kt` già registra un callback `GnssStatus.Callback` (righe 246-267) che oggi calcola solo CN0 min/media/max su tutti i satelliti visibili — un riassunto scalare per fix. Il nuovo logging è strutturalmente diverso, non un'estensione dello stesso pattern: per ogni fix, una **lista** con un elemento per ogni satellite riportato da `GnssStatus`, contenente:
+
+- `svid` (identificativo del satellite, per poter distinguere le voci)
 - `elevationDegrees` (`GnssStatus.getElevationDegrees(i)`)
 - `azimuthDegrees` (`GnssStatus.getAzimuthDegrees(i)`)
 - `usedInFix` (`GnssStatus.usedInFix(i)`)
+- `constellationType` (utile per distinguere GPS/GLONASS/Galileo/BeiDou nella stessa lista)
 
-nello stesso evento/schema già usato per i dati satellitari (`SessionEvent`/`SessionEventWriter`, estensione dello schema esistente).
+Questo è un nuovo tipo di evento/campo in `SessionEvent.kt`/`SessionEventWriter.kt` (una lista di 5-30+ elementi per fix, non 3-4 scalari), non una piccola estensione — il piano di implementazione deve trattarlo come tale (costo di serializzazione/dimensione del file di log da valutare esplicitamente, non assunto trascurabile).
 
 ### Cosa NON si fa in questo documento
 
