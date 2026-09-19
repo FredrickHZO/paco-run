@@ -90,7 +90,9 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-// RunSessionService.kt (copied verbatim in Task 3) reads BuildConfig.GIT_COMMIT_HASH at line 204
+// RunSessionService.kt (copied verbatim in Task 3) reads BuildConfig.GIT_COMMIT_HASH at line 206
+// (line number re-verified 2026-09-19 after merging main's Fase 1 work into feature/wear-os --
+// shifted by 2 lines from this plan's original citation of 204; the statement itself is unchanged)
 // -- this is a custom field, not a stock BuildConfig member, so it must be defined here the same
 // way :app's own build.gradle.kts defines it (copied verbatim from there, lines 12-32).
 abstract class GitCommitHashValueSource : ValueSource<String, ValueSourceParameters.None> {
@@ -343,6 +345,11 @@ cp app/src/test/java/dev/fred/pacorun/service/DistanceAccumulatorTest.kt wear/sr
 cp app/src/test/java/dev/fred/pacorun/service/SessionServiceSupportTest.kt wear/src/test/java/dev/fred/pacorun/service/
 cp app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorTest.kt wear/src/test/java/dev/fred/pacorun/service/
 cp app/src/test/java/dev/fred/pacorun/service/SessionCoordinatorRealRunTest.kt wear/src/test/java/dev/fred/pacorun/service/
+# Added 2026-09-19 after merging main's Fase 1 (G6 robust outlier rejection) work into
+# feature/wear-os -- this test file didn't exist when this plan was originally written, so it
+# was never in this list; the plan's own drifted-filename safeguard below does NOT catch a
+# genuinely new file (no existing cp command fails for it), so it had to be added explicitly.
+cp app/src/test/java/dev/fred/pacorun/service/RobustOutlierRejectionTest.kt wear/src/test/java/dev/fred/pacorun/service/
 cp app/src/test/resources -r wear/src/test/resources 2>/dev/null || true
 
 cp app/src/test/java/dev/fred/pacorun/pace/PaceEvaluatorTest.kt wear/src/test/java/dev/fred/pacorun/pace/
@@ -401,7 +408,7 @@ cp app/src/main/java/dev/fred/pacorun/service/RunSessionService.kt wear/src/main
 
 - [ ] **Step 2: Trim the settings read**
 
-Current (`wear/src/main/java/dev/fred/pacorun/service/RunSessionService.kt`, line 165):
+Current (`wear/src/main/java/dev/fred/pacorun/service/RunSessionService.kt`, line 167 -- re-verified 2026-09-19 after merging main's Fase 1 work in, shifted by 2 lines from this plan's original citation of 165; match by the exact statement below, not the line number):
 
 ```kotlin
             val preferences = RunPreferencesStore(this@RunSessionService).preferences.first()
