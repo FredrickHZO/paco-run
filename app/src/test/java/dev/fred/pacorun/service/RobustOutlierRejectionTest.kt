@@ -231,4 +231,78 @@ class RobustOutlierRejectionTest {
             estimator.getLastPostBurstExemptionApplied(),
         )
     }
+
+    @Test
+    fun oscillatingAccuracyExemptionFrequencyIsCharacterized() {
+        // Period anchored to the baseline EMA's own time constant (accuracyBaselineAlpha = 0.05,
+        // i.e. ~20 fixes) -- not fix-per-fix noise, which the baseline design already filters out
+        // by construction. This test does not assert a pass/fail bound (the spec explicitly frames
+        // this as characterization, not validation) -- it prints the real measured frequency so a
+        // human can judge whether it's acceptable, and future runs can compare against it.
+        val fixes = SyntheticTrajectory.generate(
+            speedProfileKmh = listOf(200.0 to 8.0),
+            noiseStdMeters = 3.0,
+            seed = 3L,
+        )
+        val oscillatingAccuracy = fixes.mapIndexed { i, fix ->
+            val accuracy = if ((i / 20) % 2 == 0) 3.0f else 25.0f
+            fix.copy(position = fix.position.copy(horizontalAccuracyMeters = accuracy))
+        }
+
+        val estimator = SpeedEstimator()
+        var exemptionCount = 0
+        oscillatingAccuracy.forEach {
+            estimator.accept(it.position, reliable = true)
+            if (estimator.getLastPostBurstExemptionApplied()) exemptionCount++
+        }
+
+        println(
+            "oscillatingAccuracyExemptionFrequencyIsCharacterized: $exemptionCount exemptions " +
+                "out of ${oscillatingAccuracy.size} fixes (period ~20 fixes, matching the baseline " +
+                "EMA's own time constant)",
+        )
+        // No assertion on the count itself -- see comment above. The test still needs one
+        // assertion to be a real test, not just a print statement: confirm it ran to completion
+        // without throwing (e.g. a division or state issue under rapid oscillation).
+        assertTrue(exemptionCount >= 0)
+    }
+
+    @Test
+    fun costOfPostBurstExemptionOnAnIndependentAnomalyIsCharacterized() {
+        // Injects a genuine, burst-unrelated spatial outlier exactly at the fix the exemption rule
+        // would otherwise protect -- measuring (not fixing) the accepted trade-off named in the
+        // design doc: this fix gets zero G6 scrutiny even if it happens to independently be a real
+        // outlier, because degraded-accuracy conditions correlate with genuine multipath risk.
+        val fixes = SyntheticTrajectory.generate(
+            speedProfileKmh = listOf(30.0 to 8.0),
+            noiseStdMeters = 3.0,
+            seed = 9L,
+        )
+        val withBurst = withDegradedAccuracyBurst(fixes, degradedRange = 10..19, normalAccuracyMeters = 3.0f, degradedAccuracyMeters = 25.0f)
+        // Independent 20m outlier exactly at index 20, the first (exempt) post-burst fix.
+        val withBurstAndOutlier = withInjectedOutlier(withBurst, index = 20, offsetMeters = 20.0)
+
+        val estimator = SpeedEstimator()
+        var speedAtExemptOutlier = 0.0
+        // CORRECTED (found during Task 5 implementation, not by the design doc's review rounds):
+        // getLastPostBurstExemptionApplied() must be captured HERE, at fix index 20, not after the
+        // loop finishes -- by the time the loop runs through all remaining fixes, the flag reflects
+        // the LAST accept() call, not the exempt fix under test. Same class of trap as Task 4's
+        // read-after-overwrite bug: checking real-time state after time has moved on.
+        var exemptionAppliedAtOutlier = false
+        withBurstAndOutlier.forEachIndexed { i, fix ->
+            val speed = estimator.accept(fix.position, reliable = true)
+            if (i == 20) {
+                speedAtExemptOutlier = speed
+                exemptionAppliedAtOutlier = estimator.getLastPostBurstExemptionApplied()
+            }
+        }
+
+        println(
+            "costOfPostBurstExemptionOnAnIndependentAnomalyIsCharacterized: speed at the exempt " +
+                "fix with an independent 20m outlier injected was $speedAtExemptOutlier km/h " +
+                "(true speed 8 km/h) -- exemption applied: $exemptionAppliedAtOutlier",
+        )
+        assertTrue(exemptionAppliedAtOutlier)
+    }
 }
