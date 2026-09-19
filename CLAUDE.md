@@ -111,19 +111,41 @@ memory is not live state.
 
 ## Branch & worktree layout
 
+**As of 2026-09-18, `main` is the live branch.** `feature/paco-run-m3e` was
+merged into `main` and deleted (its name had become stale/non-descriptive
+after absorbing too much unrelated work — don't let that happen to `main`
+either: keep branch names describing what's actually still isolated on
+them). Any older doc, plan, or memory that says "main is stale, ignore it"
+or references `feature/paco-run-m3e` predates this and is wrong — trust
+`git branch -a` / `git worktree list` over old prose.
+
 One git worktree per active branch, under `.worktrees/<short-name>`. The
 mapping from worktree folder name to branch name is *not* always identical
-(e.g. `.worktrees/paco-run-m3e-live` → `feature/paco-run-m3e`) — always
-confirm with `git worktree list` rather than assuming.
+— always confirm with `git worktree list` rather than assuming.
 
-- `main` — not the live app despite the name. Generally stale/behind, not a
-  target for feature work unless the user explicitly says otherwise. Treat
-  any operation on it as covered by hard rule 5.
-- `feature/paco-run-m3e` — the branch the user actually runs day to day for
-  real workouts. Bugs found while using the app get fixed directly here.
-- Other `feature/*` branches — isolated tracks for larger work-in-progress
-  (a redesign, a precision phase, a new mode), merged back deliberately once
-  ready, never folded in casually.
+- `main` — the live branch the user actually runs day to day for real
+  workouts, worktree at the repo root itself (no separate `-live` worktree
+  needed now). Bugs found while using the app get fixed directly here.
+  Covered by hard rule 5 like any shared branch: never act on it without
+  the user's own direct, explicit confirmation.
+- `feature/wear-os` (from 2026-09-18), worktree `.worktrees/wear-os` — the
+  whole Wear OS workstream (diagnostic app, then whatever follows), forked
+  from `main`. Deliberately named for the whole workstream, not one task
+  within it, learning from the `paco-run-m3e` naming mistake.
+- `feature/custom-routine-mode`, worktree `.worktrees/custom-routine-mode`
+  — isolated defaticamento-removal/custom-routine-mode track, left alone
+  deliberately (owner's call, 2026-09-18) until it's next picked up.
+- Other `feature/*` branches — isolated tracks for larger work-in-progress,
+  merged back into `main` deliberately once ready, never folded in casually.
+
+**Planned flow for future core-engine work once it resumes:** engine/pace
+changes are meant to land on their own short-lived `feature/*` branch
+forked from `main` (not directly on `main`, not directly on `feature/wear-os`),
+merge into `main` when done, and only then get pulled into `feature/wear-os`
+by merging `main` into it — so the watch branch picks up every engine change
+automatically via that merge, instead of duplicating engine work on two
+branches. This is a stated intent for *when* engine work resumes, not
+something already set up.
 
 ## Project-specific constraints worth knowing up front
 
