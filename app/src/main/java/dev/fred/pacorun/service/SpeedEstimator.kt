@@ -42,13 +42,29 @@ class SpeedEstimator(
     private val accuracyBaselineAlpha: Double = 0.05,
     // G6 (robust outlier rejection): joint (2-axis, chi-squared-2-consistent) weight thresholds
     // on the Mahalanobis distance d = sqrt(eastNormInnovation^2 + northNormInnovation^2).
-    // PROVISIONAL values, not yet empirically tuned -- see Task 6's sweep report. Starting points
-    // are literature chi-squared(2 dof) critical values: sqrt(5.99) (95th pct, "clearly normal
-    // below this") and sqrt(13.8) (99.9th pct, "fully reject above this").
-    private val robustWeightLowThresholdSigma: Double = 2.45,
-    private val robustWeightHighThresholdSigma: Double = 3.71,
-    // Provisional -- Task 6 tunes this alongside the two thresholds above. A fix is excluded from
-    // the innovation EMA if accuracyDegraded OR its robust weight falls below this (see Task 3).
+    // Empirically tuned (see task-6-threshold-sweep-report.md for the full 3x3 grid): 3.0/4.5
+    // gives ~4.99km/h of margin on the injected-outlier test (25m spike dampened to within 0.015
+    // km/h of the true 8 km/h, vs. the test's 5 km/h failure bound) while keeping ordinary-noise
+    // mean weight at a perfect 1.0 (vs. requiring >0.9) -- the widest combination tested that
+    // still fully protects the injected-outlier scenario: every (low, high) pair in the grid
+    // already dampens that scenario's outlier fully (deviation <=0.25 km/h in the worst case,
+    // low=2.0), so among ties on outlier protection, 3.0/4.5 is the pair least likely to react to
+    // ordinary noise. The originally-provisional literature values (sqrt(5.99)=2.45,
+    // sqrt(13.8)=3.71, the 95th/99.9th chi-squared(2 dof) percentiles) were tried and are also
+    // fully protective, but with a measurably worse ordinary-noise margin (mean weight
+    // 0.977-0.996 across the grid's other 8 combinations, vs. 1.0 here).
+    private val robustWeightLowThresholdSigma: Double = 3.0,
+    private val robustWeightHighThresholdSigma: Double = 4.5,
+    // Swept against {0.3, 0.5, 0.7} per task-6-threshold-sweep-report.md: all three values
+    // produced IDENTICAL outcomes on both Task 3 scenarios (regimeStaysQLowDuringDegradedBurstEvenWithG6Active,
+    // emaNotContaminatedImmediatelyAfterBurstEnds) -- in both, accuracyDegraded's own OR disjunct
+    // already forces exclusion (or the fix is never near enough to any tested threshold: measured
+    // peak innovation EMA of 0.31 during the burst and 0.51 just after, both comfortably below the
+    // 0.60 regime-switch threshold regardless of which weight threshold excluded the fix). So this
+    // specific sweep could not empirically discriminate between the three candidates -- kept at
+    // the literature-neutral midpoint of the [0,1] weight range (already the provisional value)
+    // rather than picking a number the data doesn't actually support. See the report for the full
+    // measurements and this caveat.
     private val emaExclusionWeightThreshold: Double = 0.5,
     private val onEvent: (SessionEvent) -> Unit = {},
 ) {
