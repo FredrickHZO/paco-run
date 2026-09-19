@@ -40,6 +40,16 @@ class SpeedEstimator(
     // on both counts; 2.0 was picked as the round number in the middle of that flat region.
     private val accuracyDegradationRatio: Double = 2.0,
     private val accuracyBaselineAlpha: Double = 0.05,
+    // G6 (robust outlier rejection): joint (2-axis, chi-squared-2-consistent) weight thresholds
+    // on the Mahalanobis distance d = sqrt(eastNormInnovation^2 + northNormInnovation^2).
+    // PROVISIONAL values, not yet empirically tuned -- see Task 6's sweep report. Starting points
+    // are literature chi-squared(2 dof) critical values: sqrt(5.99) (95th pct, "clearly normal
+    // below this") and sqrt(13.8) (99.9th pct, "fully reject above this").
+    private val robustWeightLowThresholdSigma: Double = 2.45,
+    private val robustWeightHighThresholdSigma: Double = 3.71,
+    // Provisional -- Task 6 tunes this alongside the two thresholds above. A fix is excluded from
+    // the innovation EMA if accuracyDegraded OR its robust weight falls below this (see Task 3).
+    private val emaExclusionWeightThreshold: Double = 0.5,
     private val onEvent: (SessionEvent) -> Unit = {},
 ) {
     // Round-2 fix: an EMA of *unsigned* normalized innovation magnitude cannot tell a real
@@ -132,6 +142,7 @@ class SpeedEstimator(
     // the burst started.
     private var accuracyBaselineMeters: Double? = null
     private var lastAccuracyGateEngaged: Boolean = false
+    private var lastRobustWeight: Double = 1.0
     // False whenever the last accept() returned without performing a real Kalman update (first
     // fix of a chain, or any breakChain() path): in those cases lastProcessNoise /
     // lastAccuracyGateEngaged still hold an earlier fix's values, so a caller reporting them as
@@ -142,6 +153,7 @@ class SpeedEstimator(
     internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
     internal fun getLastProcessNoise(): Double = lastProcessNoise
     internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
+    internal fun getLastRobustWeight(): Double = lastRobustWeight
     internal fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
         if (lastProcessNoise == qHigh) ProcessNoiseRegime.Q_HIGH else ProcessNoiseRegime.Q_LOW
     internal fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
@@ -203,8 +215,13 @@ class SpeedEstimator(
         val measurementVariance = accuracyMeters.pow(2)
         val eastRawInnovation = east.peekSignedNormalizedInnovation(x, measurementVariance)
         val northRawInnovation = north.peekSignedNormalizedInnovation(y, measurementVariance)
-        // TODO(Task 2): replace this hardcoded 1.0 with the real joint robust weight.
-        val effectiveMeasurementVariance = measurementVariance / 1.0
+        val jointD2 = eastRawInnovation.pow(2) + northRawInnovation.pow(2)
+        // Named jointRobustWeight, not robustWeight, specifically to avoid shadowing the
+        // robustWeight(jointD2) FUNCTION with a local val of the same simple name -- confusing to
+        // read even where Kotlin would resolve it unambiguously.
+        val jointRobustWeight = robustWeight(jointD2)
+        lastRobustWeight = jointRobustWeight
+        val effectiveMeasurementVariance = measurementVariance / jointRobustWeight
         east.apply(x, effectiveMeasurementVariance, eastRawInnovation)
         north.apply(y, effectiveMeasurementVariance, northRawInnovation)
         if (!accuracyDegraded) {
@@ -235,6 +252,22 @@ class SpeedEstimator(
 
     private fun LocationPosition.isValid() = latitude.isFinite() && longitude.isFinite() &&
         latitude in -90.0..90.0 && longitude in -180.0..180.0
+
+    /** Redescending robust weight on the joint (2-axis) squared Mahalanobis distance [jointD2]:
+     * 1.0 below [robustWeightLowThresholdSigma], linearly down to 0.0 at
+     * [robustWeightHighThresholdSigma], 0.0 beyond it. Piecewise-linear rather than a classic
+     * Huber (k/d) specifically so a genuinely extreme outlier gets FULLY rejected, not just
+     * asymptotically down-weighted -- Huber's weight is never exactly zero for any finite d,
+     * which the spec's design explicitly flagged as insufficient protection against a large
+     * multipath spike. */
+    private fun robustWeight(jointD2: Double): Double {
+        val d = sqrt(jointD2)
+        return when {
+            d <= robustWeightLowThresholdSigma -> 1.0
+            d >= robustWeightHighThresholdSigma -> 0.0
+            else -> (robustWeightHighThresholdSigma - d) / (robustWeightHighThresholdSigma - robustWeightLowThresholdSigma)
+        }
+    }
 
     private companion object {
         const val METERS_PER_DEGREE_LATITUDE = 111_320.0

@@ -63,6 +63,9 @@ data class SpeedEstimatorDiagnostics(
     val processNoiseRegime: ProcessNoiseRegime,
     val accuracyGateEngaged: Boolean,
     val innovationEmaMagnitude: Double,
+    // Appended LAST with a default, same reasoning as PaceStateConfirmedEvent.rawSpeedKmh: keeps
+    // every existing positional/named call site compiling without a shift.
+    val robustWeight: Double = 1.0,
 )
 
 enum class ProcessNoiseRegime { Q_LOW, Q_HIGH }

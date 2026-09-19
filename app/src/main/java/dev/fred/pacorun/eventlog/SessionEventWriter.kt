@@ -89,6 +89,7 @@ object SessionEventWriter {
         enum("processNoiseRegime", diagnostics.processNoiseRegime)
         boolean("accuracyGateEngaged", diagnostics.accuracyGateEngaged)
         double("innovationEmaMagnitude", diagnostics.innovationEmaMagnitude)
+        double("robustWeight", diagnostics.robustWeight)
     }
 
     private fun gpsSilentGapEvent(event: GpsSilentGapEvent) = json {

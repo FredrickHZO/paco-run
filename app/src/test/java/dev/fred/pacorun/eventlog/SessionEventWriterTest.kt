@@ -1,6 +1,7 @@
 package dev.fred.pacorun.eventlog
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionEventWriterTest {
@@ -153,10 +154,35 @@ class SessionEventWriterTest {
                 "\"rejectionReasons\":[],\"satellitesUsedInFix\":null,\"satelliteCn0MinDbHz\":null," +
                 "\"satelliteCn0AvgDbHz\":null,\"satelliteCn0MaxDbHz\":null,\"qualityTier\":\"BUONA\"," +
                 "\"speedEstimatorDiagnostics\":{\"processNoiseRegime\":\"Q_HIGH\",\"accuracyGateEngaged\":true," +
-                "\"innovationEmaMagnitude\":null}}",
+                "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0}}",
             line,
         )
         assertEquals(false, line.contains("NaN"))
+    }
+
+    @Test
+    fun speedEstimatorDiagnosticsSerializesRobustWeight() {
+        val event = LocationFixEvent(
+            elapsedRealtimeMillis = 5_000L,
+            sequenceNumber = 6,
+            elapsedSinceStartMillis = 5_000L,
+            provider = "gps",
+            reliable = true,
+            rejectionReasons = emptyList(),
+            satellitesUsedInFix = null,
+            satelliteCn0MinDbHz = null,
+            satelliteCn0AvgDbHz = null,
+            satelliteCn0MaxDbHz = null,
+            qualityTier = QualityTier.BUONA,
+            speedEstimatorDiagnostics = SpeedEstimatorDiagnostics(
+                processNoiseRegime = ProcessNoiseRegime.Q_LOW,
+                accuracyGateEngaged = false,
+                innovationEmaMagnitude = 0.1,
+                robustWeight = 0.42,
+            ),
+        )
+
+        assertTrue(SessionEventWriter.toJsonLine(event).contains("\"robustWeight\":0.42"))
     }
 
     @Test

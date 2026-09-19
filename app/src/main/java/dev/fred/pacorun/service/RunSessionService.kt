@@ -358,6 +358,7 @@ class RunSessionService : Service() {
                         processNoiseRegime = estimator.getLastProcessNoiseRegime(),
                         accuracyGateEngaged = estimator.getLastAccuracyGateEngaged(),
                         innovationEmaMagnitude = estimator.getLastInnovationEma(),
+                        robustWeight = estimator.getLastRobustWeight(),
                     )
                 } else {
                     null
