@@ -73,6 +73,22 @@ not defaults you can use judgment to override — follow them exactly.
     something (e.g. GPS accuracy) held up in a specific run/situation, check
     that specific data fresh — don't extend a conclusion from a different
     run or a different condition and present it as settled.
+12. **Any change to the core engine (Kalman filter, pace/routine decision
+    logic) needs a first-principles self-consistency check before a plan is
+    written — not just "does this look statistically reasonable."** For a
+    filter specifically: does every derived quantity (gain, covariance
+    update, EMA) stay mathematically honest given what actually happened,
+    or could a shortcut leave the filter's own confidence inconsistent with
+    what it really did? The user is a solo developer with no lab, no
+    testers, no way to independently catch a subtle logic error after the
+    fact — an algorithm that looks like it works but is quietly wrong is
+    the single worst outcome for this project, worse than an honest "we
+    don't know yet." Where real data can validate something, use it, the
+    same way the original SpeedEstimator tuning (`qHigh`, the innovation
+    EMA sign) caught two specific mistakes that synthetic math alone missed.
+    Where it can't (a condition never exercised by the user's own runs —
+    see the GPS-validation-gap constraint below), say so explicitly in the
+    roadmap instead of implying confidence that doesn't exist.
 
 ## Working process (the shape almost everything here follows)
 
