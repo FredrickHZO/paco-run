@@ -103,9 +103,9 @@ class RunSessionService : Service() {
 
     private data class GnssSnapshot(
         val satellitesUsedInFix: Int,
-        val cn0MinDbHz: Float,
-        val cn0AvgDbHz: Float,
-        val cn0MaxDbHz: Float,
+        val cn0MinDbHz: Float?,
+        val cn0AvgDbHz: Float?,
+        val cn0MaxDbHz: Float?,
         val geometry: List<SatelliteGeometry>,
     )
 
@@ -258,7 +258,9 @@ class RunSessionService : Service() {
                 for (i in 0 until status.satelliteCount) {
                     // Per-satellite geometry is recorded for EVERY satellite Android reports, not
                     // only ones used in the fix -- a future DOP computation needs the full visible
-                    // constellation's geometry, not just the subset the fix happened to use.
+                    // constellation's geometry, not just the subset the fix happened to use. This
+                    // is collected independently of the CN0 aggregate stats below, which are only
+                    // meaningful when at least one satellite was actually used in the fix.
                     geometry += SatelliteGeometry(
                         svid = status.getSvid(i),
                         constellationType = status.getConstellationType(i),
@@ -273,7 +275,13 @@ class RunSessionService : Service() {
                     if (cn0 > max) max = cn0
                     sum += cn0
                 }
-                lastGnssSnapshot = if (used > 0) GnssSnapshot(used, min, sum / used, max, geometry) else null
+                lastGnssSnapshot = GnssSnapshot(
+                    satellitesUsedInFix = used,
+                    cn0MinDbHz = if (used > 0) min else null,
+                    cn0AvgDbHz = if (used > 0) sum / used else null,
+                    cn0MaxDbHz = if (used > 0) max else null,
+                    geometry = geometry,
+                )
             }
         }
         try {

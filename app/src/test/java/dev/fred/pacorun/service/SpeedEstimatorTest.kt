@@ -84,8 +84,17 @@ class SpeedEstimatorTest {
     @Test
     fun breakChainResetsAccuracyGateEngagedFlag() {
         val estimator = SpeedEstimator()
-        estimator.accept(fix(45.0, 9.0, 0L), reliable = true)
-        estimator.accept(fix(0.0, 0.0, 1_000L), reliable = false) // forces breakChain() via the unreliable path
+        val latitude = 45.0
+
+        // First fix only initializes the chain (accept() returns early before accuracyDegraded
+        // is ever computed) -- it can't engage the gate itself, it just seeds the ~3m baseline.
+        estimator.accept(LocationPosition(latitude, 9.0, 0L, 3f), reliable = true)
+        // Second fix, same chain, accuracy far worse than the baseline (30m vs. ~3m, well past
+        // the 2x degradation ratio) -- this is the fix that must actually engage the gate.
+        estimator.accept(LocationPosition(latitude, 9.0, 1_000L, 30f), reliable = true)
+        assertTrue("precondition: the gate should have engaged on this fix", estimator.getLastAccuracyGateEngaged())
+
+        estimator.accept(fix(0.0, 0.0, 2_000L), reliable = false) // forces breakChain() via the unreliable path
         assertFalse(estimator.getLastAccuracyGateEngaged())
     }
 
