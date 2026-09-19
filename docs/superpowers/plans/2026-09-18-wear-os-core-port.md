@@ -563,6 +563,52 @@ git commit -m "feat: wire RunSessionService into :wear with a minimal Start/Stop
 
 ---
 
+### Addendum (2026-09-19, during Task 4): hardcoded `RunPreferences` changed from placeholder to the owner's real routine
+
+Found while starting real-hardware testing: the placeholder `RunPreferences(cueVolume = 0f)` from Task 3
+(CONSTANT mode, 7.5-8.5 km/h, the class's own defaults) is not something a runner can act on. For a
+comparison test against the phone to mean anything, `:wear` needs to run the SAME routine shape the
+owner actually uses on `:app`, not a neutral placeholder. This is a deliberate, explicit override of
+this plan's own "no settings UI, no routine editor" constraint's *placeholder values* — the constraint
+itself (no UI to CHANGE it on-device) stays intact; only the one hardcoded literal changes.
+
+**Not a live-sync mechanism between phone and watch — deliberately rejected.** The owner's real worry was
+whether phone and watch runs can be compared meaningfully if each device's `PendingSessionCoordinator`
+activates (starts its own routine clock) at a slightly different real moment (each device needs its OWN
+first reliable GPS fix, and `:wear`'s UI gives no visual "waiting for GPS" cue the way `:app`'s does).
+Resolution: no code changes for this -- both devices' GPX exports carry real UTC timestamps, so any
+comparison is done by wall-clock alignment after the fact (the same causal, trailing-window methodology
+already used for Strava comparisons), not by assuming live in-app synchrony. The practical mitigation is
+a start PROCEDURE (start the watch first, then the phone, wait for the phone's own "GPS pronto" cue
+before physically moving), not new code -- documented here so a future reader doesn't reintroduce a
+sync mechanism to solve a problem that's already handled by the export format.
+
+Final hardcoded value, replacing Task 3's `RunPreferences(cueVolume = 0f)`:
+
+```kotlin
+val preferences = RunPreferences(
+    mode = RoutineMode.WALK_RUN,
+    constantRange = SpeedRange(4.5f, 7f), // the 1km warmup's pace
+    runRange = SpeedRange(7.5f, 9f),
+    walkRange = SpeedRange(4.5f, 7f),
+    initialConstantKm = 1f,
+    runSeconds = 60,
+    walkSeconds = 90,
+    cueVolume = 0f,
+)
+```
+
+`walkUsesConstantRange` is left at its class default (`true`) deliberately -- `constantRange` and
+`walkRange` are set to the identical 4.5-7 km/h here, so the walk phase's effective range is 4.5-7
+regardless of which of the two fields `RoutineEngine` actually reads. This mirrors the owner's own
+workaround for a separate, unconfirmed `:app` UI issue (editing the walk-range control in
+`RoutineEditorScreen.kt` didn't visibly take effect) -- not diagnosed or fixed here, out of scope for
+this plan; tracked as a to-investigate item, reproducible only live, not from a static code read.
+
+- [ ] **Apply the change:** modify the single line in `wear/src/main/java/dev/fred/pacorun/service/RunSessionService.kt` that constructs `RunPreferences` (Task 3's edit site) to the block above. Add `import dev.fred.pacorun.settings.RoutineMode` and `import dev.fred.pacorun.settings.SpeedRange` if not already present in that file's import list (check first -- `RunPreferences`/`SpeedRange` may already be imported from Task 3).
+- [ ] Run `./gradlew :wear:assembleDebug` and confirm BUILD SUCCESSFUL.
+- [ ] Commit: `git commit -m "feat: hardcode :wear's routine to the owner's real walk-run config for comparison testing"`.
+
 ### Task 4: Real-hardware verification (owner's own step)
 
 **Files:** none — checkpoint, no code changes.
