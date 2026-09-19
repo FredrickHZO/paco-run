@@ -125,4 +125,40 @@ class RobustOutlierRejectionTest {
             regimesAfterBurst.count { it == ProcessNoiseRegime.Q_HIGH } == 0,
         )
     }
+
+    @Test
+    fun normalAccuracyButAnomalousResidualStillExcludesFromEma() {
+        val fixes = SyntheticTrajectory.generate(
+            speedProfileKmh = listOf(30.0 to 8.0),
+            noiseStdMeters = 3.0,
+            seed = 7L,
+        )
+        // A 25m northward jump on ONE fix, with NORMAL/GOOD declared accuracy (same shape as
+        // goodAccuracyButAnomalousPositionIsDampened). This triggers the second OR disjunct
+        // (jointRobustWeight < emaExclusionWeightThreshold), not the first (accuracyDegraded).
+        // The EMA must be bit-for-bit unchanged because the entire `if (!excludedFromEma)` block
+        // is skipped; any tolerance-based check would miss the real mistake (treating || as &&
+        // or deleting the second criterion entirely).
+        val withOutlier = withInjectedOutlier(fixes, index = 15, offsetMeters = 25.0)
+
+        val estimator = SpeedEstimator()
+        // Feed up to (not including) the outlier
+        withOutlier.take(15).forEach { estimator.accept(it.position, reliable = true) }
+        val emaBeforeOutlier = estimator.getLastInnovationEma()
+
+        // Feed the outlier fix and check it was excluded via the second criterion, not the first
+        estimator.accept(withOutlier[15].position, reliable = true)
+        val accuracyGateEngaged = estimator.getLastAccuracyGateEngaged()
+        val emaAfterOutlier = estimator.getLastInnovationEma()
+
+        assertTrue(
+            "accuracy gate (G7) should NOT have been engaged for normal-accuracy outlier, was: $accuracyGateEngaged",
+            !accuracyGateEngaged,
+        )
+        assertTrue(
+            "EMA must be unchanged when outlier is excluded via G6 (second OR criterion); " +
+                "before=$emaBeforeOutlier, after=$emaAfterOutlier",
+            emaBeforeOutlier == emaAfterOutlier,
+        )
+    }
 }
