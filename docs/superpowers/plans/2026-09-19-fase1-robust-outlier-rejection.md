@@ -10,6 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-19-fase1-robust-outlier-rejection-design.md` — read it in full before starting; this plan assumes it, and repeats only what each task needs verbatim. That spec itself went through five rounds of adversarial review; several of its details (the post-burst exemption, the `breakChain()` fix, the exact EMA-exclusion OR logic) exist *because* of specific bugs those rounds found — the "why" comments in the code below reference them so a reader six months from now doesn't accidentally undo a fix by "simplifying."
 
+## Branch
+
+`feature/gps-outlier-rejection`, forked from `main` @ `5998715` (this plan's own commit), worktree `.worktrees/gps-outlier-rejection` — does not exist yet, must be created before Task 1. Named for the whole G6/G9 workstream, not per-task, per this project's own past naming-mistake lesson (`feature/paco-run-m3e` absorbing unrelated work). Merges back into `main` when Task 8 is done and the owner gives explicit go-ahead — never merged automatically.
+
 ## Global Constraints
 
 - **Hard rule 12 (`CLAUDE.md`):** any core-engine change needs a first-principles self-consistency check before being considered done, not just a plausibility check — Task 5 makes this an explicit, written deliverable, not an implicit code-review nicety.
