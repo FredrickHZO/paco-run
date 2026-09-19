@@ -3,6 +3,7 @@ package dev.fred.pacorun.service
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlin.math.abs
 
 class SpeedEstimatorRealRunTest {
     @Test
@@ -61,6 +62,36 @@ class SpeedEstimatorRealRunTest {
                 "of ordinary real-run fixes -- should be rare, not routine " +
                 "(bound ${maxRealRunEngagementFraction * 100}%)",
             engagementFraction <= maxRealRunEngagementFraction,
+        )
+    }
+
+    @Test
+    fun g6ProducesNoRegressionOnTheRecordedRealRun() {
+        val fixes = loadPacoRunGpxFixture()
+        assertTrue("fixture failed to load any fixes", fixes.isNotEmpty())
+
+        val withG6 = SpeedEstimator()
+        val speedsWithG6 = fixes.map { (position, reliable) -> withG6.accept(position, reliable) }
+
+        // G6 structurally disabled: a low threshold this high means every fix's joint distance is
+        // always <= it, so robustWeight(jointD2) always returns 1.0 -- equivalent to this run
+        // never having G6 at all, without a separate code path to maintain.
+        val withoutG6 = SpeedEstimator(robustWeightLowThresholdSigma = Double.MAX_VALUE)
+        val speedsWithoutG6 = fixes.map { (position, reliable) -> withoutG6.accept(position, reliable) }
+
+        val maxAbsoluteDifferenceKmh = speedsWithG6.zip(speedsWithoutG6)
+            .maxOf { (withWeight, withoutWeight) -> abs(withWeight - withoutWeight) }
+        println(
+            "g6ProducesNoRegressionOnTheRecordedRealRun: max per-fix divergence between G6-on and " +
+                "G6-off replays of the same real run = $maxAbsoluteDifferenceKmh km/h " +
+                "(original Strava-validated baseline for this run, established separately and " +
+                "unaffected by this comparison: MAE 0.242 km/h)",
+        )
+        // This run has no known G6-relevant anomaly (see the design doc's own caveat) -- expect
+        // near-zero divergence, not a specific small-but-nonzero number invented here.
+        assertTrue(
+            "expected G6 to have negligible effect on this anomaly-free run, max divergence was $maxAbsoluteDifferenceKmh km/h",
+            maxAbsoluteDifferenceKmh < 0.5,
         )
     }
 

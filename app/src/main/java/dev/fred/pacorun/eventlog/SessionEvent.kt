@@ -47,7 +47,16 @@ data class LocationFixEvent(
     val satelliteCn0MaxDbHz: Float?,
     val qualityTier: QualityTier,
     val speedEstimatorDiagnostics: SpeedEstimatorDiagnostics?,
+    val satelliteGeometry: List<SatelliteGeometry> = emptyList(),
 ) : SessionEvent
+
+data class SatelliteGeometry(
+    val svid: Int,
+    val constellationType: Int,
+    val elevationDegrees: Float,
+    val azimuthDegrees: Float,
+    val usedInFix: Boolean,
+)
 
 enum class RejectionReason {
     MISSING_OR_INVALID_SPEED,
@@ -63,6 +72,10 @@ data class SpeedEstimatorDiagnostics(
     val processNoiseRegime: ProcessNoiseRegime,
     val accuracyGateEngaged: Boolean,
     val innovationEmaMagnitude: Double,
+    // Appended LAST with a default, same reasoning as PaceStateConfirmedEvent.rawSpeedKmh: keeps
+    // every existing positional/named call site compiling without a shift.
+    val robustWeight: Double = 1.0,
+    val postBurstExemptionApplied: Boolean = false,
 )
 
 enum class ProcessNoiseRegime { Q_LOW, Q_HIGH }

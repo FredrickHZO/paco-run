@@ -39,6 +39,7 @@ import dev.fred.pacorun.eventlog.GpsSilentGapEvent
 import dev.fred.pacorun.eventlog.LifecycleTransition
 import dev.fred.pacorun.eventlog.LocationFixEvent
 import dev.fred.pacorun.eventlog.NetworkType
+import dev.fred.pacorun.eventlog.SatelliteGeometry
 import dev.fred.pacorun.eventlog.SensorAvailability
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SessionStarted
@@ -102,9 +103,10 @@ class RunSessionService : Service() {
 
     private data class GnssSnapshot(
         val satellitesUsedInFix: Int,
-        val cn0MinDbHz: Float,
-        val cn0AvgDbHz: Float,
-        val cn0MaxDbHz: Float,
+        val cn0MinDbHz: Float?,
+        val cn0AvgDbHz: Float?,
+        val cn0MaxDbHz: Float?,
+        val geometry: List<SatelliteGeometry>,
     )
 
     private val locationCallback = object : LocationCallback() {
@@ -252,7 +254,20 @@ class RunSessionService : Service() {
                 var min = Float.MAX_VALUE
                 var max = -Float.MAX_VALUE
                 var sum = 0f
+                val geometry = mutableListOf<SatelliteGeometry>()
                 for (i in 0 until status.satelliteCount) {
+                    // Per-satellite geometry is recorded for EVERY satellite Android reports, not
+                    // only ones used in the fix -- a future DOP computation needs the full visible
+                    // constellation's geometry, not just the subset the fix happened to use. This
+                    // is collected independently of the CN0 aggregate stats below, which are only
+                    // meaningful when at least one satellite was actually used in the fix.
+                    geometry += SatelliteGeometry(
+                        svid = status.getSvid(i),
+                        constellationType = status.getConstellationType(i),
+                        elevationDegrees = status.getElevationDegrees(i),
+                        azimuthDegrees = status.getAzimuthDegrees(i),
+                        usedInFix = status.usedInFix(i),
+                    )
                     if (!status.usedInFix(i)) continue
                     used++
                     val cn0 = status.getCn0DbHz(i)
@@ -260,7 +275,13 @@ class RunSessionService : Service() {
                     if (cn0 > max) max = cn0
                     sum += cn0
                 }
-                lastGnssSnapshot = if (used > 0) GnssSnapshot(used, min, sum / used, max) else null
+                lastGnssSnapshot = GnssSnapshot(
+                    satellitesUsedInFix = used,
+                    cn0MinDbHz = if (used > 0) min else null,
+                    cn0AvgDbHz = if (used > 0) sum / used else null,
+                    cn0MaxDbHz = if (used > 0) max else null,
+                    geometry = geometry,
+                )
             }
         }
         try {
@@ -358,10 +379,13 @@ class RunSessionService : Service() {
                         processNoiseRegime = estimator.getLastProcessNoiseRegime(),
                         accuracyGateEngaged = estimator.getLastAccuracyGateEngaged(),
                         innovationEmaMagnitude = estimator.getLastInnovationEma(),
+                        robustWeight = estimator.getLastRobustWeight(),
+                        postBurstExemptionApplied = estimator.getLastPostBurstExemptionApplied(),
                     )
                 } else {
                     null
                 },
+                satelliteGeometry = snapshot?.geometry ?: emptyList(),
             ),
         )
         val buffered = pendingEventsDuringTick.toList()
