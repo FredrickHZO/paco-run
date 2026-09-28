@@ -170,3 +170,5 @@ data class DeviceHealthSampledEvent(
 ) : SessionEvent
 
 enum class ThermalStatus { NONE, LIGHT, MODERATE, SEVERE, CRITICAL, EMERGENCY, SHUTDOWN, UNKNOWN }
+
+data class LocationReliability(val reliable: Boolean, val reasons: List<RejectionReason>)

@@ -1,6 +1,7 @@
 package dev.fred.pacorun.location
 
 import android.location.Location
+import dev.fred.pacorun.eventlog.LocationReliability
 import dev.fred.pacorun.eventlog.QualityTier
 import dev.fred.pacorun.eventlog.RejectionReason
 import java.util.concurrent.TimeUnit
@@ -91,5 +92,3 @@ class LocationSampleMapper(
         )
     }
 }
-
-data class LocationReliability(val reliable: Boolean, val reasons: List<RejectionReason>)
