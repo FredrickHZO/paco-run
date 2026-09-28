@@ -85,7 +85,6 @@ class LocationSampleMapper(
     }
 
     companion object {
-        const val DEFAULT_MAX_AGE_MILLIS = 3_000L
         private val MISSING_DATA_REASONS = setOf(
             RejectionReason.MISSING_OR_INVALID_SPEED,
             RejectionReason.MISSING_OR_INVALID_SPEED_ACCURACY,

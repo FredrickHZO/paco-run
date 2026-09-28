@@ -7,8 +7,8 @@ import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SpeedChainBreakReason
 import dev.fred.pacorun.eventlog.SpeedChainBrokenEvent
+import dev.fred.pacorun.location.DEFAULT_MAX_AGE_MILLIS
 import dev.fred.pacorun.location.LocationSample
-import dev.fred.pacorun.location.LocationSampleMapper
 import dev.fred.pacorun.pace.PaceConfig
 import dev.fred.pacorun.pace.PaceEvaluator
 import dev.fred.pacorun.pace.PaceResult
@@ -61,7 +61,7 @@ data class SessionStartPrerequisites(val hasFineLocation: Boolean) {
 }
 
 class GpsFreshnessTracker(
-    private val maxAgeMillis: Long = LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS,
+    private val maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS,
 ) {
     private var latestReliableSampleElapsedRealtimeMillis: Long? = null
 
@@ -285,7 +285,7 @@ class SessionCoordinator(
             speedChainBrokenReportedForOutage = false
         } else if (
             !gpsReliable &&
-            elapsedRealtimeMillis - lastReliableFixElapsedMillis >= LocationSampleMapper.DEFAULT_MAX_AGE_MILLIS
+            elapsedRealtimeMillis - lastReliableFixElapsedMillis >= DEFAULT_MAX_AGE_MILLIS
         ) {
             // Tempo REALE trascorso dall'ultimo fix affidabile, non "che tipo di chiamata ha
             // innescato la transizione" (il gate del Task 9 confondeva le due cose: un flusso
