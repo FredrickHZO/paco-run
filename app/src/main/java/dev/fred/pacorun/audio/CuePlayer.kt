@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import dev.fred.pacorun.R
 import dev.fred.pacorun.pace.Cue
 import dev.fred.pacorun.routine.RoutineCue
+import dev.fred.pacorun.service.CueSignal
 
 enum class AudioCue(@param:RawRes val resourceId: Int) {
     TOO_SLOW(R.raw.too_slow),
@@ -42,6 +43,11 @@ fun Cue.toAudioCue(): AudioCue = when (this) {
 }
 
 fun RoutineCue.toAudioCue(): AudioCue = AudioCue.valueOf(name)
+
+fun CueSignal.toAudioCue(): AudioCue = when (this) {
+    is CueSignal.Pace -> cue.toAudioCue()
+    is CueSignal.Routine -> cue.toAudioCue()
+}
 
 data class QueuedAudioCue(val cue: AudioCue, val volume: Float)
 
