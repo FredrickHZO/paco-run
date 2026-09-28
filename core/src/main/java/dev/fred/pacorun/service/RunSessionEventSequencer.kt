@@ -98,12 +98,14 @@ class RunSessionEventSequencer(
     fun onTimerTick(now: Long): TimerTickResult {
         val second = now / TICK_MILLIS
         if (second == lastTimerSecond) return TimerTickResult(emptyList(), false)
+        val previousTimerSecond = lastTimerSecond
         lastTimerSecond = second
 
         val gpsOutage = gpsFreshness.isOutage(now)
         try {
             coordinator.advanceTimer(now, signalGpsOutage = gpsOutage)
         } catch (e: Throwable) {
+            lastTimerSecond = previousTimerSecond
             pendingEvents.clear()
             throw e
         }
