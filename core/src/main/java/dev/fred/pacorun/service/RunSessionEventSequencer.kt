@@ -57,7 +57,12 @@ class RunSessionEventSequencer(
         val silentGapEvent = gpsSilentGap.recordCallback(now)?.let { GpsSilentGapEvent(now, it) }
 
         engineSpeedKmh = null
-        coordinator.tick(elapsedRealtimeMillis = now, sample = sample, position = position)
+        try {
+            coordinator.tick(elapsedRealtimeMillis = now, sample = sample, position = position)
+        } catch (e: Throwable) {
+            pendingEvents.clear()
+            throw e
+        }
 
         val diagnostics = if (reliability.reliable) {
             (speedEngine as? SpeedEngineDiagnostics)?.let { if (it.lastAcceptWasMeasurement()) it.diagnostics() else null }
@@ -96,7 +101,12 @@ class RunSessionEventSequencer(
         lastTimerSecond = second
 
         val gpsOutage = gpsFreshness.isOutage(now)
-        coordinator.advanceTimer(now, signalGpsOutage = gpsOutage)
+        try {
+            coordinator.advanceTimer(now, signalGpsOutage = gpsOutage)
+        } catch (e: Throwable) {
+            pendingEvents.clear()
+            throw e
+        }
 
         val buffered = pendingEvents.toList()
         pendingEvents.clear()
