@@ -6,6 +6,7 @@ import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SpeedChainBreakReason
 import dev.fred.pacorun.eventlog.SpeedChainBrokenEvent
+import dev.fred.pacorun.eventlog.SpeedEstimatorDiagnostics
 import dev.fred.pacorun.location.DEFAULT_MAX_AGE_MILLIS
 import dev.fred.pacorun.location.LocationSample
 import dev.fred.pacorun.pace.PaceConfig
@@ -465,11 +466,21 @@ class PaceEvaluatorAdapter(private val evaluator: PaceEvaluator) : SessionPaceEv
     override fun accept(sample: LocationSample, rawSpeedKmh: Float?) = evaluator.accept(sample, rawSpeedKmh)
 }
 
-class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstimator()) : SessionSpeedEngine {
+class KalmanSpeedEngine(private val speedEstimator: SpeedEstimator = SpeedEstimator()) : SessionSpeedEngine, SpeedEngineDiagnostics {
     override fun accept(sample: LocationSample, position: LocationPosition, reliable: Boolean): Double =
         speedEstimator.accept(position, reliable)
 
     override fun breakChain(): Double = speedEstimator.breakChain()
+
+    override fun diagnostics(): SpeedEstimatorDiagnostics = SpeedEstimatorDiagnostics(
+        processNoiseRegime = speedEstimator.getLastProcessNoiseRegime(),
+        accuracyGateEngaged = speedEstimator.getLastAccuracyGateEngaged(),
+        innovationEmaMagnitude = speedEstimator.getLastInnovationEma(),
+        robustWeight = speedEstimator.getLastRobustWeight(),
+        postBurstExemptionApplied = speedEstimator.getLastPostBurstExemptionApplied(),
+    )
+
+    override fun lastAcceptWasMeasurement(): Boolean = speedEstimator.getLastAcceptWasMeasurement()
 }
 
 /**
