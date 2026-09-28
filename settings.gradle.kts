@@ -31,3 +31,5 @@ plugins {
 
 rootProject.name = "Paco Run"
 include(":app")
+include(":core")
+include(":android-connector")
