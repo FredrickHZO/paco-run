@@ -1,6 +1,5 @@
 package dev.fred.pacorun.service
 
-import dev.fred.pacorun.audio.AudioCue
 import dev.fred.pacorun.eventlog.AudioCueEmittedEvent
 import dev.fred.pacorun.eventlog.DistanceChainBreakReason
 import dev.fred.pacorun.eventlog.DistanceChainBrokenEvent
@@ -51,7 +50,7 @@ object RunSessionStore {
     private val mutableState = MutableStateFlow<RunSessionState>(RunSessionState.Idle)
     val state: StateFlow<RunSessionState> = mutableState.asStateFlow()
 
-    internal fun publish(state: RunSessionState) {
+    fun publish(state: RunSessionState) {
         mutableState.value = state
     }
 }
@@ -226,7 +225,7 @@ class SessionCoordinator(
     private val preferences: RunPreferences,
     private val routineEngine: SessionRoutineEngine,
     private val paceEvaluator: SessionPaceEvaluator,
-    private val onCues: (List<AudioCue>, Float) -> Unit,
+    private val onCues: (List<CueSignal>) -> Unit,
     private val publish: (RunSessionState) -> Unit,
     private val startedAtElapsedMillis: Long = 0L,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
@@ -365,9 +364,9 @@ class SessionCoordinator(
             else -> latestPace
         }
         latestPace = pace
-        val cues = routine.cues.map { AudioCue.valueOf(it.name) } + listOfNotNull(pace.cue?.let { AudioCue.valueOf(it.name) })
+        val cues = routine.cues.map { CueSignal.Routine(it) } + listOfNotNull(pace.cue?.let { CueSignal.Pace(it) })
         if (cues.isNotEmpty()) {
-            onCues(cues, preferences.cueVolume)
+            onCues(cues)
             cues.forEach {
                 onEvent(
                     AudioCueEmittedEvent(
@@ -412,7 +411,7 @@ class PendingSessionCoordinator(
     private val preferences: RunPreferences,
     private val routineEngine: SessionRoutineEngine,
     private val paceEvaluator: SessionPaceEvaluator,
-    private val onCues: (List<AudioCue>, Float) -> Unit,
+    private val onCues: (List<CueSignal>) -> Unit,
     private val publish: (RunSessionState) -> Unit,
     private val distanceEngine: SessionDistanceEngine = DistanceAccumulator(),
     private val speedEngine: SessionSpeedEngine = KalmanSpeedEngine(),

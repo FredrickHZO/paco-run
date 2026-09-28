@@ -33,6 +33,7 @@ import com.google.android.gms.location.Priority
 import dev.fred.pacorun.BuildConfig
 import dev.fred.pacorun.R
 import dev.fred.pacorun.audio.CuePlayer
+import dev.fred.pacorun.audio.toAudioCue
 import dev.fred.pacorun.eventlog.AppLifecycleChangedEvent
 import dev.fred.pacorun.eventlog.DeviceHealthSampledEvent
 import dev.fred.pacorun.eventlog.GpsSilentGapEvent
@@ -217,7 +218,7 @@ class RunSessionService : Service() {
             preferences = preferences,
             routineEngine = RoutineEngineAdapter(RoutineEngine(preferences, onEvent = onEvent)),
             paceEvaluator = PaceEvaluatorAdapter(PaceEvaluator(preferences.paceConfig(), onEvent = onEvent)),
-            onCues = { cues, volume -> cuePlayer?.enqueue(cues, volume) },
+            onCues = { cues -> cuePlayer?.enqueue(cues.map { it.toAudioCue() }, preferences.cueVolume) },
             publish = ::publish,
             distanceEngine = DistanceAccumulator(onEvent = onEvent),
             speedEngine = KalmanSpeedEngine(speedEstimator),

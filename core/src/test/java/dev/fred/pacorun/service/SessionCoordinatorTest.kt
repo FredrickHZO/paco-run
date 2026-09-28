@@ -1,6 +1,5 @@
 package dev.fred.pacorun.service
 
-import dev.fred.pacorun.audio.AudioCue
 import dev.fred.pacorun.location.LocationSample
 import dev.fred.pacorun.pace.Cue
 import dev.fred.pacorun.pace.PaceConfig
@@ -29,7 +28,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
+            onCues = { cues -> events += "cues:${cues.joinToString { it.name }}" },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -69,7 +68,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { cues, _ -> events += "cues:${cues.joinToString()}" },
+            onCues = { cues -> events += "cues:${cues.joinToString { it.name }}" },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -94,7 +93,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -113,14 +112,14 @@ class SessionCoordinatorTest {
 
     @Test
     fun timerBeforeEveryLocationDoesNotBreakPaceConfirmation() {
-        val cues = mutableListOf<AudioCue>()
+        val cues = mutableListOf<CueSignal>()
         val coordinator = SessionCoordinator(
             preferences = RunPreferences(confirmationSamples = 2),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = PaceEvaluatorAdapter(
                 dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, false)),
             ),
-            onCues = { values, _ -> cues += values },
+            onCues = { values -> cues += values },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -129,7 +128,7 @@ class SessionCoordinatorTest {
         coordinator.tick(1_000L, sample = null, position = null)
         coordinator.tick(1_000L, reliableSample(9f, 1_000L), LocationPosition(0.0, .00001, 1_000L))
 
-        assertTrue(AudioCue.TOO_FAST in cues)
+        assertTrue(CueSignal.Pace(Cue.TOO_FAST) in cues)
     }
 
     @Test
@@ -140,7 +139,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -157,14 +156,14 @@ class SessionCoordinatorTest {
 
     @Test
     fun weakGpsCueAndRecoveryClearPaceCandidates() {
-        val cues = mutableListOf<AudioCue>()
+        val cues = mutableListOf<CueSignal>()
         val coordinator = SessionCoordinator(
             preferences = RunPreferences(confirmationSamples = 2, gpsCuesEnabled = true),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = PaceEvaluatorAdapter(
                 dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, true)),
             ),
-            onCues = { values, _ -> cues += values },
+            onCues = { values -> cues += values },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -174,9 +173,12 @@ class SessionCoordinatorTest {
         coordinator.tick(2_000L, reliableSample(9f, 2_000L), LocationPosition(0.0, .00002, 2_000L))
         coordinator.tick(3_000L, reliableSample(9f, 3_000L), LocationPosition(0.0, .00003, 3_000L))
 
-        assertEquals(listOf(AudioCue.BAD_GPS, AudioCue.GOOD_GPS, AudioCue.TOO_FAST), cues.filter {
-            it == AudioCue.BAD_GPS || it == AudioCue.GOOD_GPS || it == AudioCue.TOO_FAST
-        })
+        assertEquals(
+            listOf(CueSignal.Pace(Cue.BAD_GPS), CueSignal.Pace(Cue.GOOD_GPS), CueSignal.Pace(Cue.TOO_FAST)),
+            cues.filter {
+                it == CueSignal.Pace(Cue.BAD_GPS) || it == CueSignal.Pace(Cue.GOOD_GPS) || it == CueSignal.Pace(Cue.TOO_FAST)
+            },
+        )
     }
 
     @Test
@@ -186,7 +188,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -200,7 +202,7 @@ class SessionCoordinatorTest {
 
     @Test
     fun healthyTimerRetainsReliableSpeedForStateAndPhaseDirectionCue() {
-        val cues = mutableListOf<AudioCue>()
+        val cues = mutableListOf<CueSignal>()
         val published = mutableListOf<RunSessionState>()
         val preferences = RunPreferences(
             mode = RoutineMode.WALK_RUN,
@@ -215,7 +217,7 @@ class SessionCoordinatorTest {
             preferences = preferences,
             routineEngine = RoutineEngineAdapter(dev.fred.pacorun.routine.RoutineEngine(preferences)),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 11f, null)),
-            onCues = { values, _ -> cues += values },
+            onCues = { values -> cues += values },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -224,7 +226,7 @@ class SessionCoordinatorTest {
         cues.clear()
         coordinator.advanceTimer(1_000L, signalGpsOutage = false)
 
-        assertEquals(listOf(AudioCue.WALK_ROUTINE, AudioCue.SLOW_DOWN), cues)
+        assertEquals(listOf(CueSignal.Routine(RoutineCue.WALK_ROUTINE), CueSignal.Routine(RoutineCue.SLOW_DOWN)), cues)
         val state = published.last() as RunSessionState.Running
         assertTrue(state.gpsReliable)
         assertEquals(11f, state.speedKmh)
@@ -233,14 +235,14 @@ class SessionCoordinatorTest {
 
     @Test
     fun profileChangesDuringOneOutageEmitOneBadGpsThenOneGoodGpsOnRecovery() {
-        val cues = mutableListOf<AudioCue>()
+        val cues = mutableListOf<CueSignal>()
         val coordinator = SessionCoordinator(
             preferences = RunPreferences(gpsCuesEnabled = true),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = true),
             paceEvaluator = PaceEvaluatorAdapter(
                 dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 8f, 2, 5_000L, true)),
             ),
-            onCues = { values, _ -> cues += values },
+            onCues = { values -> cues += values },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -250,9 +252,12 @@ class SessionCoordinatorTest {
         coordinator.advanceTimer(2_000L, signalGpsOutage = true)
         coordinator.tick(3_000L, reliableSample(8f, 3_000L), LocationPosition(0.0, 0.0, 3_000L))
 
-        assertEquals(listOf(AudioCue.BAD_GPS, AudioCue.GOOD_GPS), cues.filter {
-            it == AudioCue.BAD_GPS || it == AudioCue.GOOD_GPS
-        })
+        assertEquals(
+            listOf(CueSignal.Pace(Cue.BAD_GPS), CueSignal.Pace(Cue.GOOD_GPS)),
+            cues.filter {
+                it == CueSignal.Pace(Cue.BAD_GPS) || it == CueSignal.Pace(Cue.GOOD_GPS)
+            },
+        )
     }
 
     private fun reliableSample(speedKmh: Float, time: Long) = LocationSample(speedKmh, .2f, true, time)
@@ -265,7 +270,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = speedEngine,
         )
@@ -287,7 +292,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
             speedEngine = speedEngine,
         )
@@ -309,7 +314,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = FakeSpeedEngine(fixedOutput = 7.0),
             onSpeedComputed = { computed += it },
@@ -330,7 +335,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -350,7 +355,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GPS_WEAK, null, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -370,7 +375,7 @@ class SessionCoordinatorTest {
             preferences = preferences,
             routineEngine = RoutineEngineAdapter(dev.fred.pacorun.routine.RoutineEngine(preferences)),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
         )
@@ -390,7 +395,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
         )
@@ -405,14 +410,14 @@ class SessionCoordinatorTest {
     @Test
     fun isolatedUnreliableFixDoesNotResetKalmanSpeedEngineOrCauseSpuriousPaceCue() {
         val preferences = RunPreferences(confirmationSamples = 1)
-        val cues = mutableListOf<AudioCue>()
+        val cues = mutableListOf<CueSignal>()
         val coordinator = SessionCoordinator(
             preferences = preferences,
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = PaceEvaluatorAdapter(
                 dev.fred.pacorun.pace.PaceEvaluator(PaceConfig(7f, 9f, 1, 5_000L, false)),
             ),
-            onCues = { values, _ -> cues += values },
+            onCues = { values -> cues += values },
             publish = {},
             // Real KalmanSpeedEngine, not a fake -- this is exactly what Task 4's fakes missed.
         )
@@ -451,7 +456,7 @@ class SessionCoordinatorTest {
         // PaceEvaluator emette TOO_SLOW pur non essendoci stato alcun cambio di ritmo reale.
         assertTrue(
             "spurious pace cue after an isolated unreliable fix, no real pace change occurred: $cues",
-            AudioCue.TOO_SLOW !in cues,
+            CueSignal.Pace(Cue.TOO_SLOW) !in cues,
         )
     }
 
@@ -462,7 +467,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = speedEngine,
         )
@@ -480,7 +485,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = speedEngine,
         )
@@ -513,7 +518,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
             onEvent = events::add,
@@ -537,7 +542,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
             onEvent = events::add,
@@ -565,7 +570,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = speedEngine,
             onEvent = events::add,
@@ -601,7 +606,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = FakeRoutineEngine(mutableListOf(), profileChanged = false),
             paceEvaluator = FakePaceEvaluator(mutableListOf(), PaceResult(PaceState.GOOD, 8f, null)),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = FakeSpeedEngine(),
             onEvent = events::add,
@@ -631,7 +636,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
             paceSmoother = smoother,
@@ -651,7 +656,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
             paceSmoother = smoother,
@@ -671,7 +676,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = FakeSpeedEngine(),
             paceSmoother = smoother,
@@ -697,7 +702,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = {},
             speedEngine = DopplerSpeedEngine(),
             paceSmoother = smoother,
@@ -724,7 +729,7 @@ class SessionCoordinatorTest {
             preferences = RunPreferences(),
             routineEngine = routine,
             paceEvaluator = pace,
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
             speedEngine = DopplerSpeedEngine(),
             paceSmoother = smoother,

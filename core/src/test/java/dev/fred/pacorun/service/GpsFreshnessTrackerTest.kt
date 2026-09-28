@@ -1,6 +1,6 @@
 package dev.fred.pacorun.service
 
-import dev.fred.pacorun.location.LocationSampleMapper
+import dev.fred.pacorun.location.LocationSample
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,10 +9,10 @@ class GpsFreshnessTrackerTest {
     @Test
     fun alreadyOldCallbackDoesNotMakeGpsFresh() {
         val tracker = GpsFreshnessTracker()
-        val staleSample = LocationSampleMapper().map(
-            speedMps = 2.5f,
-            accuracyMps = .1f,
-            ageMillis = 3_001L,
+        val staleSample = LocationSample(
+            speedKmh = 0f,
+            speedAccuracyKmh = null,
+            reliable = false,
             elapsedRealtimeMillis = 6_999L,
         )
 
@@ -24,10 +24,10 @@ class GpsFreshnessTrackerTest {
     @Test
     fun reliableSampleExpiresImmediatelyAfterMapperFreshnessLimit() {
         val tracker = GpsFreshnessTracker()
-        val freshSample = LocationSampleMapper().map(
-            speedMps = 2.5f,
-            accuracyMps = .1f,
-            ageMillis = 0L,
+        val freshSample = LocationSample(
+            speedKmh = 0f,
+            speedAccuracyKmh = null,
+            reliable = true,
             elapsedRealtimeMillis = 10_000L,
         )
 

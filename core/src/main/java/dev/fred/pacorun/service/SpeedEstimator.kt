@@ -167,14 +167,14 @@ class SpeedEstimator(
     private var lastAcceptWasMeasurement = false
 
     // Test/debugging accessors (internal visibility)
-    internal fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
+    fun getLastInnovationEma(): Double = maxOf(kotlin.math.abs(eastInnovationEma), kotlin.math.abs(northInnovationEma))
     internal fun getLastProcessNoise(): Double = lastProcessNoise
-    internal fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
-    internal fun getLastRobustWeight(): Double = lastRobustWeight
-    internal fun getLastPostBurstExemptionApplied(): Boolean = lastPostBurstExemptionApplied
-    internal fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
+    fun getLastAccuracyGateEngaged(): Boolean = lastAccuracyGateEngaged
+    fun getLastRobustWeight(): Double = lastRobustWeight
+    fun getLastPostBurstExemptionApplied(): Boolean = lastPostBurstExemptionApplied
+    fun getLastProcessNoiseRegime(): ProcessNoiseRegime =
         if (lastProcessNoise == qHigh) ProcessNoiseRegime.Q_HIGH else ProcessNoiseRegime.Q_LOW
-    internal fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
+    fun getLastAcceptWasMeasurement(): Boolean = lastAcceptWasMeasurement
 
     fun accept(position: LocationPosition, reliable: Boolean): Double {
         if (!reliable || !position.isValid()) {

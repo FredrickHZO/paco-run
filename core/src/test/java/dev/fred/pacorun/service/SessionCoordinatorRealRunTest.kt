@@ -31,7 +31,7 @@ class SessionCoordinatorRealRunTest {
                     ),
                 ),
             ),
-            onCues = { _, _ -> },
+            onCues = { _ -> },
             publish = published::add,
         )
 
