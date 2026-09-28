@@ -3,7 +3,7 @@ package dev.fred.pacorun.audio
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import dev.fred.pacorun.R
+import dev.fred.pacorun.connector.R
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith

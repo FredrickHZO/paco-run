@@ -12,7 +12,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import dev.fred.pacorun.R
+import dev.fred.pacorun.connector.R
 import dev.fred.pacorun.pace.Cue
 import dev.fred.pacorun.routine.RoutineCue
 import dev.fred.pacorun.service.CueSignal

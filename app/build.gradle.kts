@@ -74,6 +74,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":android-connector"))
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.compose.material3:material3:1.5.0-alpha27")
     implementation("androidx.compose.material:material-icons-extended")
