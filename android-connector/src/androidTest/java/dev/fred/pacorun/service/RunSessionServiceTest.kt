@@ -27,7 +27,7 @@ class RunSessionServiceTest {
     // il guard onStartCommand `if (!starting && sequencer == null) startSession()` resterebbe
     // permanentemente falso dopo la prima sessione.
     @Test
-    fun `a second session starts after the first one is stopped`() {
+    fun secondSessionStartsAfterFirstIsStopped() {
         val context = ApplicationProvider.getApplicationContext<android.app.Application>()
 
         val startIntent = Intent(context, RunSessionService::class.java).setAction(RunSessionService.ACTION_START)
