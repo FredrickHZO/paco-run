@@ -73,6 +73,8 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core"))
+    implementation(project(":android-connector"))
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.compose.material3:material3:1.5.0-alpha27")
     implementation("androidx.compose.material:material-icons-extended")
@@ -81,8 +83,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.navigation:navigation-compose:2.9.5")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
-    implementation("androidx.media3:media3-exoplayer:1.9.3")
-    implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
