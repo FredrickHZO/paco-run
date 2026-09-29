@@ -1,10 +1,8 @@
 package dev.fred.pacorun.location
 
-import android.location.Location
 import dev.fred.pacorun.eventlog.LocationReliability
 import dev.fred.pacorun.eventlog.QualityTier
 import dev.fred.pacorun.eventlog.RejectionReason
-import java.util.concurrent.TimeUnit
 
 class LocationSampleMapper(
     private val maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS,
@@ -16,17 +14,6 @@ class LocationSampleMapper(
     // rejecting ordinary conditions.
     private val maxHorizontalAccuracyMeters: Float = 20f,
 ) {
-    fun map(location: Location, nowElapsedRealtimeMillis: Long): LocationSample {
-        val elapsedRealtimeMillis = TimeUnit.NANOSECONDS.toMillis(location.elapsedRealtimeNanos)
-        return map(
-            speedMps = location.takeIf { it.hasSpeed() }?.speed,
-            accuracyMps = location.takeIf { it.hasSpeedAccuracy() }?.speedAccuracyMetersPerSecond,
-            ageMillis = nowElapsedRealtimeMillis - elapsedRealtimeMillis,
-            elapsedRealtimeMillis = elapsedRealtimeMillis,
-            horizontalAccuracyMeters = location.takeIf { it.hasAccuracy() }?.accuracy,
-        )
-    }
-
     fun map(
         speedMps: Float?,
         accuracyMps: Float?,

@@ -1,8 +1,10 @@
 package dev.fred.pacorun.service
 
+import android.Manifest
 import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
 import androidx.test.rule.ServiceTestRule
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
@@ -13,6 +15,12 @@ import org.junit.runner.RunWith
 class RunSessionServiceTest {
     @get:Rule
     val serviceRule: ServiceTestRule = ServiceTestRule()
+
+    @get:Rule
+    val permissionRule: GrantPermissionRule = GrantPermissionRule.grant(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+    )
 
     // Caso 10: il rischio più grave del documento -- il ciclo di vita del campo `sequencer`.
     // Senza l'azzeramento esplicito in stopSession(), una seconda sessione non partirebbe MAI:
