@@ -598,6 +598,25 @@ val preferences = RunPreferences(
 )
 ```
 
+**Nota post-fix (2026-09-30):** questa sezione è storicamente stale. `walkUsesConstantRange` non
+esiste più in `RunPreferences` -- è stato rimosso interamente da `main` dopo che si è scoperto essere
+un bug reale, non un dettaglio innocuo: il flag di default era `true`, e nessun punto dell'interfaccia
+lo riportava mai a `true` dopo la rimozione di una vecchia funzionalità -- l'unico modo per farlo
+diventare `false` era modificare per davvero lo slider del range di camminata in
+`RoutineEditorScreen.kt`. Risultato: qualunque installazione che non avesse mai toccato quello slider
+usava silenziosamente `constantRange` al posto di `walkRange` per la fase WALK, con la UI che mostrava
+un valore preso in prestito indistinguibile da uno reale. `RoutineEngine.activeRange()` ora usa sempre
+`preferences.walkRange` direttamente per `RoutinePhase.WALK`, senza indirezione -- **questo è
+plausibilmente lo stesso "issue UI non confermato" descritto sotto** (l'editing del range di camminata
+che "non sembrava avere effetto visibile"): con il flag bloccato a `true`, il valore mostrato prima di
+un editing esplicito era sempre quello preso in prestito da `constantRange`, non il vero `walkRange` --
+coerente col sintomo, anche se non diagnosticato/confermato con certezza all'epoca. Quando questo
+task viene ripreso, il blocco di configurazione sotto va semplicemente adattato rimuovendo il
+riferimento al campo (bastano `constantRange`/`walkRange` impostati agli stessi valori, se si vuole
+ancora lo stesso comportamento di test).
+
+Testo originale, per riferimento storico:
+
 `walkUsesConstantRange` is left at its class default (`true`) deliberately -- `constantRange` and
 `walkRange` are set to the identical 4.5-7 km/h here, so the walk phase's effective range is 4.5-7
 regardless of which of the two fields `RoutineEngine` actually reads. This mirrors the owner's own
