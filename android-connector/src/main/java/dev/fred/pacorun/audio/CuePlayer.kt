@@ -157,6 +157,7 @@ class CuePlayer(context: Context, private val ducking: AudioDucking = SystemAudi
 
     private fun enqueueInternal(cues: List<AudioCue>, volume: Float) {
         if (closed) return
+        if (volume <= 0f) return
         queue.enqueue(cues, volume)
         if (!playing) {
             // Always post rather than calling straight through: onFocusLost fires from inside

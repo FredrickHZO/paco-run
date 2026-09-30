@@ -194,8 +194,8 @@ private fun WalkSection(preferences: RunPreferences, onPreferencesChange: (RunPr
         )
         SpeedRangeControl(
             label = "Andatura",
-            range = if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange,
-            onChange = { onPreferencesChange(preferences.copy(walkUsesConstantRange = false, walkRange = it)) },
+            range = preferences.walkRange,
+            onChange = { onPreferencesChange(preferences.copy(walkRange = it)) },
             roleColor = colors.tertiary,
             roleOnColor = colors.onTertiary,
             minTag = UiTags.walkMinSpeed,
@@ -255,7 +255,14 @@ private fun VoiceGpsSection(preferences: RunPreferences, onPreferencesChange: (R
             checked = preferences.gpsCuesEnabled,
             color = colors.secondary,
             tag = UiTags.gpsCues,
+            enabled = preferences.cuesEnabled,
         ) { onPreferencesChange(preferences.copy(gpsCuesEnabled = it)) }
+        ToggleRow(
+            label = "Avvisi vocali",
+            checked = preferences.cuesEnabled,
+            color = colors.secondary,
+            tag = UiTags.cuesEnabled,
+        ) { onPreferencesChange(preferences.copy(cuesEnabled = it)) }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "Volume avvisi · ${(preferences.cueVolume * 100).toInt()}%",
@@ -265,6 +272,7 @@ private fun VoiceGpsSection(preferences: RunPreferences, onPreferencesChange: (R
             Slider(
                 value = preferences.cueVolume.coerceIn(0f, 1f),
                 onValueChange = { onPreferencesChange(preferences.copy(cueVolume = it)) },
+                enabled = preferences.cuesEnabled,
                 colors = SliderDefaults.colors(
                     thumbColor = colors.secondary,
                     activeTrackColor = colors.secondary,
@@ -277,7 +285,14 @@ private fun VoiceGpsSection(preferences: RunPreferences, onPreferencesChange: (R
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, color: Color, tag: String, onCheckedChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    color: Color,
+    tag: String,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -290,7 +305,7 @@ private fun ToggleRow(label: String, checked: Boolean, color: Color, tag: String
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = color, style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 

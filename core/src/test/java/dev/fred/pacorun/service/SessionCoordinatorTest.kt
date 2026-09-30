@@ -208,7 +208,6 @@ class SessionCoordinatorTest {
             mode = RoutineMode.WALK_RUN,
             constantRange = SpeedRange(7f, 8f),
             runRange = SpeedRange(9f, 10f),
-            walkUsesConstantRange = false,
             walkRange = SpeedRange(4f, 5f),
             runSeconds = 1,
             walkSeconds = 60,

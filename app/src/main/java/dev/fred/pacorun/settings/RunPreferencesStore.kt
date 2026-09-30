@@ -36,6 +36,10 @@ class RunPreferencesStore(private val context: Context) {
         update { it.copy(gpsCuesEnabled = value) }
     }
 
+    suspend fun setCuesEnabled(value: Boolean) {
+        update { it.copy(cuesEnabled = value) }
+    }
+
     suspend fun setCueVolume(value: Float) {
         update { it.copy(cueVolume = value.coerceIn(0f, 1f)) }
     }
@@ -63,7 +67,6 @@ class RunPreferencesStore(private val context: Context) {
                 values[Keys.runMinKmh] ?: defaults.runRange.minKmh,
                 values[Keys.runMaxKmh] ?: defaults.runRange.maxKmh,
             ),
-            walkUsesConstantRange = values[Keys.walkUsesConstantRange] ?: defaults.walkUsesConstantRange,
             walkRange = SpeedRange(
                 values[Keys.walkMinKmh] ?: defaults.walkRange.minKmh,
                 values[Keys.walkMaxKmh] ?: defaults.walkRange.maxKmh,
@@ -76,6 +79,7 @@ class RunPreferencesStore(private val context: Context) {
             confirmationSamples = values[Keys.confirmationSamples] ?: defaults.confirmationSamples,
             repeatMillis = values[Keys.repeatMillis] ?: defaults.repeatMillis,
             gpsCuesEnabled = values[Keys.gpsCuesEnabled] ?: defaults.gpsCuesEnabled,
+            cuesEnabled = values[Keys.cuesEnabled] ?: defaults.cuesEnabled,
             cueVolume = values[Keys.cueVolume] ?: defaults.cueVolume,
             dynamicColor = values[Keys.dynamicColor] ?: defaults.dynamicColor,
         )
@@ -87,7 +91,6 @@ class RunPreferencesStore(private val context: Context) {
         values[Keys.constantMaxKmh] = preferences.constantRange.maxKmh
         values[Keys.runMinKmh] = preferences.runRange.minKmh
         values[Keys.runMaxKmh] = preferences.runRange.maxKmh
-        values[Keys.walkUsesConstantRange] = preferences.walkUsesConstantRange
         values[Keys.walkMinKmh] = preferences.walkRange.minKmh
         values[Keys.walkMaxKmh] = preferences.walkRange.maxKmh
         values[Keys.initialConstantKm] = preferences.initialConstantKm
@@ -98,6 +101,7 @@ class RunPreferencesStore(private val context: Context) {
         values[Keys.confirmationSamples] = preferences.confirmationSamples
         values[Keys.repeatMillis] = preferences.repeatMillis
         values[Keys.gpsCuesEnabled] = preferences.gpsCuesEnabled
+        values[Keys.cuesEnabled] = preferences.cuesEnabled
         values[Keys.cueVolume] = preferences.cueVolume
         values[Keys.dynamicColor] = preferences.dynamicColor
     }
@@ -108,7 +112,6 @@ class RunPreferencesStore(private val context: Context) {
         val constantMaxKmh = floatPreferencesKey("constant_max_kmh")
         val runMinKmh = floatPreferencesKey("run_min_kmh")
         val runMaxKmh = floatPreferencesKey("run_max_kmh")
-        val walkUsesConstantRange = booleanPreferencesKey("walk_uses_constant_range")
         val walkMinKmh = floatPreferencesKey("walk_min_kmh")
         val walkMaxKmh = floatPreferencesKey("walk_max_kmh")
         val initialConstantKm = floatPreferencesKey("initial_constant_km")
@@ -121,6 +124,7 @@ class RunPreferencesStore(private val context: Context) {
         val confirmationSamples = intPreferencesKey("confirmation_samples")
         val repeatMillis = longPreferencesKey("repeat_millis")
         val gpsCuesEnabled = booleanPreferencesKey("gps_cues_enabled")
+        val cuesEnabled = booleanPreferencesKey("cues_enabled")
         val cueVolume = floatPreferencesKey("cue_volume")
         val dynamicColor = booleanPreferencesKey("dynamic_color")
     }

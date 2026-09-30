@@ -284,7 +284,7 @@ private fun RoutineScene(preferences: RunPreferences) {
                     PhaseTypography(
                         "Camminata",
                         preferences.walkSeconds,
-                        (if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange).label,
+                        preferences.walkRange.label,
                     )
                 }
             }

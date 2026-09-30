@@ -176,7 +176,7 @@ class RoutineEngine(private val preferences: RunPreferences, private val onEvent
 
     private fun activeRange() = when (phase) {
         RoutinePhase.RUN -> preferences.runRange
-        RoutinePhase.WALK -> if (preferences.walkUsesConstantRange) preferences.constantRange else preferences.walkRange
+        RoutinePhase.WALK -> preferences.walkRange
         else -> preferences.constantRange
     }
 

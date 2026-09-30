@@ -172,7 +172,9 @@ class RunSessionService : Service() {
 
         sequencer = RunSessionEventSequencer(
             preferences = preferences,
-            onCues = { cues -> cuePlayer?.enqueue(cues.map { it.toAudioCue() }, preferences.cueVolume) },
+            onCues = { cues ->
+                if (preferences.cuesEnabled) cuePlayer?.enqueue(cues.map { it.toAudioCue() }, preferences.cueVolume)
+            },
             publish = ::publish,
             sessionStartedAtElapsedMillis = sessionStartedAtElapsedMillis,
         )

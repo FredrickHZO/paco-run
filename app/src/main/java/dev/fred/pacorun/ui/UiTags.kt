@@ -23,6 +23,7 @@ object UiTags {
     const val routineDistance = "routine-distance"
     const val routineDistanceError = "routine-distance-error"
     const val gpsCues = "gps-cues"
+    const val cuesEnabled = "cues-enabled"
     const val cueVolume = "cue-volume"
     const val saveRoutine = "save-routine"
 

@@ -37,7 +37,6 @@ object SessionEventWriter {
         enum("mode", preferences.mode)
         raw("constantRange", speedRange(preferences.constantRange))
         raw("runRange", speedRange(preferences.runRange))
-        boolean("walkUsesConstantRange", preferences.walkUsesConstantRange)
         raw("walkRange", speedRange(preferences.walkRange))
         // Float -> Double via String round-trip, not a direct cast (same reason as
         // RoutineEngine.kmToMeters): a direct cast carries the source Float's binary artifact
@@ -51,6 +50,7 @@ object SessionEventWriter {
         int("confirmationSamples", preferences.confirmationSamples)
         long("repeatMillis", preferences.repeatMillis)
         boolean("gpsCuesEnabled", preferences.gpsCuesEnabled)
+        boolean("cuesEnabled", preferences.cuesEnabled)
         double("cueVolume", preferences.cueVolume.toString().toDouble())
         boolean("dynamicColor", preferences.dynamicColor)
     }

@@ -47,6 +47,22 @@ class CuePlayerAudioDuckingTest {
     }
 
     @Test
+    fun enqueueingASilentCueDoesNotRequestDucking() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val ducking = FakeAudioDucking()
+        lateinit var player: CuePlayer
+        instrumentation.runOnMainSync {
+            player = CuePlayer(ApplicationProvider.getApplicationContext<Context>(), ducking)
+        }
+
+        thread { player.enqueue(listOf(AudioCue.ROUTINE_START), 0f) }.join()
+        instrumentation.waitForIdleSync()
+
+        assertEquals(0, ducking.requestCount.get())
+        assertEquals(0, player.queueSizeForTest())
+    }
+
+    @Test
     fun closingThePlayerReleasesDucking() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val ducking = FakeAudioDucking()

@@ -11,7 +11,6 @@ data class RunPreferences(
     val mode: RoutineMode = RoutineMode.CONSTANT,
     val constantRange: SpeedRange = SpeedRange(7.5f, 8.5f),
     val runRange: SpeedRange = SpeedRange(7.5f, 8.5f),
-    val walkUsesConstantRange: Boolean = true,
     val walkRange: SpeedRange = SpeedRange(4f, 6f),
     val initialConstantKm: Float = 0f,
     val runSeconds: Int = 60,
@@ -21,6 +20,7 @@ data class RunPreferences(
     val confirmationSamples: Int = 2,
     val repeatMillis: Long = 5_000L,
     val gpsCuesEnabled: Boolean = false,
+    val cuesEnabled: Boolean = true,
     val cueVolume: Float = .6f,
     val dynamicColor: Boolean = true,
 ) {
@@ -30,9 +30,8 @@ data class RunPreferences(
             if (!cueVolume.isFinite() || cueVolume !in 0f..1f) return false
             if (mode != RoutineMode.WALK_RUN) return true
 
-            val effectiveWalkRange = if (walkUsesConstantRange) constantRange else walkRange
             return runRange.isValid &&
-                effectiveWalkRange.isValid &&
+                walkRange.isValid &&
                 initialConstantKm.isFinite() &&
                 initialConstantKm >= 0f &&
                 runSeconds > 0 &&

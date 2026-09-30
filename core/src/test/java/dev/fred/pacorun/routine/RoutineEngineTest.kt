@@ -172,18 +172,6 @@ class RoutineEngineTest {
     }
 
     @Test
-    fun walkCanReuseConstantOrUseDedicatedRange() {
-        val sharedWalk = RoutineEngine(preferences(runSeconds = 5, walkUsesConstantRange = true))
-        val dedicatedWalk = RoutineEngine(preferences(runSeconds = 5, walkUsesConstantRange = false))
-
-        sharedWalk.accept(input(time = 0L))
-        dedicatedWalk.accept(input(time = 0L))
-
-        assertEquals(SpeedRange(7f, 8f), sharedWalk.accept(input(time = 5_000L)).activeRange)
-        assertEquals(SpeedRange(4f, 5f), dedicatedWalk.accept(input(time = 5_000L)).activeRange)
-    }
-
-    @Test
     fun unlimitedRoutineNeverEntersConstantAfter() {
         val engine = RoutineEngine(preferences(runSeconds = 5, walkSeconds = 5, unlimited = true))
 
@@ -320,14 +308,12 @@ class RoutineEngineTest {
         warmupKm: Float = 0f,
         runSeconds: Int = 20,
         walkSeconds: Int = 30,
-        walkUsesConstantRange: Boolean = false,
         unlimited: Boolean = true,
         routineKm: Float = 5f,
     ) = RunPreferences(
         mode = RoutineMode.WALK_RUN,
         constantRange = SpeedRange(7f, 8f),
         runRange = SpeedRange(9f, 10f),
-        walkUsesConstantRange = walkUsesConstantRange,
         walkRange = SpeedRange(4f, 5f),
         initialConstantKm = warmupKm,
         runSeconds = runSeconds,

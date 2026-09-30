@@ -11,7 +11,6 @@ class RunPreferencesTest {
         val p = RunPreferences()
         assertEquals(RoutineMode.CONSTANT, p.mode)
         assertEquals(SpeedRange(7.5f, 8.5f), p.constantRange)
-        assertTrue(p.walkUsesConstantRange)
         assertEquals(60, p.runSeconds)
         assertEquals(120, p.walkSeconds)
         assertEquals(0f, p.initialConstantKm)
@@ -25,7 +24,7 @@ class RunPreferencesTest {
         assertFalse(base.copy(runSeconds = 0).isValid)
         assertFalse(base.copy(walkSeconds = 0).isValid)
         assertFalse(base.copy(routineKm = 0f).isValid)
-        assertFalse(base.copy(walkUsesConstantRange = false, walkRange = SpeedRange(6f, 6f)).isValid)
+        assertFalse(base.copy(walkRange = SpeedRange(6f, 6f)).isValid)
     }
 
     @Test
