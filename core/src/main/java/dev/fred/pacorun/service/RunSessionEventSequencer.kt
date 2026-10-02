@@ -52,6 +52,7 @@ class RunSessionEventSequencer(
         reliability: LocationReliability,
         qualityTier: QualityTier,
         now: Long,
+        measurementSnapshot: GnssMeasurementSnapshot? = null,
     ): LocationFixResult {
         gpsFreshness.record(sample)
         val silentGapEvent = gpsSilentGap.recordCallback(now)?.let { GpsSilentGapEvent(now, it) }
@@ -83,6 +84,11 @@ class RunSessionEventSequencer(
             qualityTier = qualityTier,
             speedEstimatorDiagnostics = diagnostics,
             satelliteGeometry = snapshot?.geometry ?: emptyList(),
+            gnssClockBiasNanos = measurementSnapshot?.clockBiasNanos,
+            gnssClockBiasUncertaintyNanos = measurementSnapshot?.clockBiasUncertaintyNanos,
+            gnssClockDriftNanosPerSecond = measurementSnapshot?.clockDriftNanosPerSecond,
+            gnssClockDriftUncertaintyNanosPerSecond = measurementSnapshot?.clockDriftUncertaintyNanosPerSecond,
+            satelliteMeasurements = measurementSnapshot?.measurements ?: emptyList(),
         )
 
         val buffered = pendingEvents.toList()

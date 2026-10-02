@@ -84,6 +84,11 @@ object SessionEventWriter {
         enum("qualityTier", event.qualityTier)
         raw("speedEstimatorDiagnostics", event.speedEstimatorDiagnostics?.let(::speedEstimatorDiagnostics))
         objectArray("satelliteGeometry", event.satelliteGeometry, ::satelliteGeometry)
+        doubleOrNull("gnssClockBiasNanos", event.gnssClockBiasNanos)
+        doubleOrNull("gnssClockBiasUncertaintyNanos", event.gnssClockBiasUncertaintyNanos)
+        doubleOrNull("gnssClockDriftNanosPerSecond", event.gnssClockDriftNanosPerSecond)
+        doubleOrNull("gnssClockDriftUncertaintyNanosPerSecond", event.gnssClockDriftUncertaintyNanosPerSecond)
+        objectArray("satelliteMeasurements", event.satelliteMeasurements, ::satelliteMeasurement)
     }
 
     private fun speedEstimatorDiagnostics(diagnostics: SpeedEstimatorDiagnostics) = json {
@@ -106,6 +111,15 @@ object SessionEventWriter {
         floatOrNull("elevationDegrees", satellite.elevationDegrees)
         floatOrNull("azimuthDegrees", satellite.azimuthDegrees)
         boolean("usedInFix", satellite.usedInFix)
+    }
+
+    private fun satelliteMeasurement(measurement: SatelliteMeasurement) = json {
+        int("svid", measurement.svid)
+        int("constellationType", measurement.constellationType)
+        double("pseudorangeRateMetersPerSecond", measurement.pseudorangeRateMetersPerSecond)
+        double("pseudorangeRateUncertaintyMetersPerSecond", measurement.pseudorangeRateUncertaintyMetersPerSecond)
+        double("cn0DbHz", measurement.cn0DbHz)
+        int("state", measurement.state)
     }
 
     private fun gpsSilentGapEvent(event: GpsSilentGapEvent) = json {
@@ -214,6 +228,7 @@ private class JsonObjectBuilder {
     fun intOrNull(name: String, value: Int?) = raw(name, value?.toString())
     fun boolean(name: String, value: Boolean) = raw(name, value.toString())
     fun double(name: String, value: Double) = raw(name, jsonNumber(value))
+    fun doubleOrNull(name: String, value: Double?) = raw(name, value?.let { jsonNumber(it) })
     fun floatOrNull(name: String, value: Float?) = raw(name, value?.let { jsonNumber(it) })
     fun enum(name: String, value: Enum<*>) = raw(name, "\"${value.name}\"")
     fun enumOrNull(name: String, value: Enum<*>?) = raw(name, value?.let { "\"${it.name}\"" })

@@ -48,6 +48,13 @@ data class LocationFixEvent(
     val qualityTier: QualityTier,
     val speedEstimatorDiagnostics: SpeedEstimatorDiagnostics?,
     val satelliteGeometry: List<SatelliteGeometry> = emptyList(),
+    // G12 phase 1: raw per-satellite Doppler, from GnssMeasurementsEvent -- a separate callback
+    // from the GnssStatus one above, so present/absent independently of satelliteGeometry.
+    val gnssClockBiasNanos: Double? = null,
+    val gnssClockBiasUncertaintyNanos: Double? = null,
+    val gnssClockDriftNanosPerSecond: Double? = null,
+    val gnssClockDriftUncertaintyNanosPerSecond: Double? = null,
+    val satelliteMeasurements: List<SatelliteMeasurement> = emptyList(),
 ) : SessionEvent
 
 data class SatelliteGeometry(
@@ -56,6 +63,15 @@ data class SatelliteGeometry(
     val elevationDegrees: Float,
     val azimuthDegrees: Float,
     val usedInFix: Boolean,
+)
+
+data class SatelliteMeasurement(
+    val svid: Int,
+    val constellationType: Int,
+    val pseudorangeRateMetersPerSecond: Double,
+    val pseudorangeRateUncertaintyMetersPerSecond: Double,
+    val cn0DbHz: Double,
+    val state: Int,
 )
 
 enum class RejectionReason {

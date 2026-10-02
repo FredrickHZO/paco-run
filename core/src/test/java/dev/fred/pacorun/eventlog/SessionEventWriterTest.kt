@@ -121,7 +121,9 @@ class SessionEventWriterTest {
                 "\"rejectionReasons\":[\"SPEED_ACCURACY_TOO_HIGH\",\"FIX_TOO_OLD\"]," +
                 "\"satellitesUsedInFix\":6,\"satelliteCn0MinDbHz\":18.5,\"satelliteCn0AvgDbHz\":24.1," +
                 "\"satelliteCn0MaxDbHz\":30.0,\"qualityTier\":\"SCARSA\",\"speedEstimatorDiagnostics\":null," +
-                "\"satelliteGeometry\":[]}",
+                "\"satelliteGeometry\":[],\"gnssClockBiasNanos\":null,\"gnssClockBiasUncertaintyNanos\":null," +
+                "\"gnssClockDriftNanosPerSecond\":null,\"gnssClockDriftUncertaintyNanosPerSecond\":null," +
+                "\"satelliteMeasurements\":[]}",
             SessionEventWriter.toJsonLine(event),
         )
     }
@@ -156,7 +158,9 @@ class SessionEventWriterTest {
                 "\"satelliteCn0AvgDbHz\":null,\"satelliteCn0MaxDbHz\":null,\"qualityTier\":\"BUONA\"," +
                 "\"speedEstimatorDiagnostics\":{\"processNoiseRegime\":\"Q_HIGH\",\"accuracyGateEngaged\":true," +
                 "\"innovationEmaMagnitude\":null,\"robustWeight\":1.0,\"postBurstExemptionApplied\":false}," +
-                "\"satelliteGeometry\":[]}",
+                "\"satelliteGeometry\":[],\"gnssClockBiasNanos\":null,\"gnssClockBiasUncertaintyNanos\":null," +
+                "\"gnssClockDriftNanosPerSecond\":null,\"gnssClockDriftUncertaintyNanosPerSecond\":null," +
+                "\"satelliteMeasurements\":[]}",
             line,
         )
         assertEquals(false, line.contains("NaN"))
@@ -212,6 +216,47 @@ class SessionEventWriterTest {
         assertTrue(json.contains("\"satelliteGeometry\":[" +
             "{\"svid\":12,\"constellationType\":1,\"elevationDegrees\":45.5,\"azimuthDegrees\":180.0,\"usedInFix\":true}," +
             "{\"svid\":5,\"constellationType\":3,\"elevationDegrees\":10.2,\"azimuthDegrees\":270.0,\"usedInFix\":false}]"))
+    }
+
+    @Test
+    fun locationFixEventSerializesGnssMeasurementFieldsAndPerSatelliteList() {
+        val event = LocationFixEvent(
+            elapsedRealtimeMillis = 8_000L,
+            sequenceNumber = 9,
+            elapsedSinceStartMillis = 8_000L,
+            provider = "gps",
+            reliable = true,
+            rejectionReasons = emptyList(),
+            satellitesUsedInFix = 2,
+            satelliteCn0MinDbHz = null,
+            satelliteCn0AvgDbHz = null,
+            satelliteCn0MaxDbHz = null,
+            qualityTier = QualityTier.OTTIMA,
+            speedEstimatorDiagnostics = null,
+            gnssClockBiasNanos = 123.0,
+            gnssClockBiasUncertaintyNanos = 4.5,
+            gnssClockDriftNanosPerSecond = -6.7,
+            gnssClockDriftUncertaintyNanosPerSecond = 0.8,
+            satelliteMeasurements = listOf(
+                SatelliteMeasurement(
+                    svid = 12,
+                    constellationType = 1,
+                    pseudorangeRateMetersPerSecond = -350.2,
+                    pseudorangeRateUncertaintyMetersPerSecond = 0.05,
+                    cn0DbHz = 32.4,
+                    state = 15,
+                ),
+            ),
+        )
+
+        val json = SessionEventWriter.toJsonLine(event)
+        assertTrue(json.contains("\"gnssClockBiasNanos\":123.0"))
+        assertTrue(json.contains("\"gnssClockBiasUncertaintyNanos\":4.5"))
+        assertTrue(json.contains("\"gnssClockDriftNanosPerSecond\":-6.7"))
+        assertTrue(json.contains("\"gnssClockDriftUncertaintyNanosPerSecond\":0.8"))
+        assertTrue(json.contains("\"satelliteMeasurements\":[" +
+            "{\"svid\":12,\"constellationType\":1,\"pseudorangeRateMetersPerSecond\":-350.2," +
+            "\"pseudorangeRateUncertaintyMetersPerSecond\":0.05,\"cn0DbHz\":32.4,\"state\":15}]"))
     }
 
     @Test

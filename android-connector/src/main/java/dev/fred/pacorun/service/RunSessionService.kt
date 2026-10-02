@@ -11,6 +11,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
+import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationManager
@@ -23,6 +24,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -37,6 +39,7 @@ import dev.fred.pacorun.eventlog.AppLifecycleChangedEvent
 import dev.fred.pacorun.eventlog.LifecycleTransition
 import dev.fred.pacorun.eventlog.NetworkType
 import dev.fred.pacorun.eventlog.SatelliteGeometry
+import dev.fred.pacorun.eventlog.SatelliteMeasurement
 import dev.fred.pacorun.eventlog.SensorAvailability
 import dev.fred.pacorun.eventlog.SessionEvent
 import dev.fred.pacorun.eventlog.SessionStarted
@@ -75,6 +78,8 @@ class RunSessionService : Service() {
     private var eventLogger: SessionEventLogger? = null
     private var gnssStatusCallback: GnssStatus.Callback? = null
     private var lastGnssSnapshot: GnssSnapshot? = null
+    private var gnssMeasurementsCallback: GnssMeasurementsEvent.Callback? = null
+    private var lastGnssMeasurementSnapshot: GnssMeasurementSnapshot? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -147,6 +152,7 @@ class RunSessionService : Service() {
         sessionStartedAtElapsedMillis = SystemClock.elapsedRealtime()
         sessionStartedAtInstant = Instant.now()
         lastGnssSnapshot = null
+        lastGnssMeasurementSnapshot = null
 
         eventLogger = SessionEventLogger(applicationContext)
         eventLogger?.start(GpxExporter.eventLogFileNameFor(sessionStartedAtInstant))
@@ -191,6 +197,7 @@ class RunSessionService : Service() {
             return
         }
         registerGnssStatusCallback()
+        registerGnssMeasurementsCallback()
         locationRequested = true
         handler.post(ticker)
         starting = false
@@ -235,6 +242,54 @@ class RunSessionService : Service() {
             gnssStatusCallback = callback
         } catch (_: SecurityException) {
         }
+    }
+
+    private fun registerGnssMeasurementsCallback() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val locationManager = getSystemService(LocationManager::class.java) ?: return
+        val callback = object : GnssMeasurementsEvent.Callback() {
+            override fun onGnssMeasurementsReceived(event: GnssMeasurementsEvent) {
+                val clock = event.clock
+                val measurements = event.measurements.map { measurement ->
+                    SatelliteMeasurement(
+                        svid = measurement.svid,
+                        constellationType = measurement.constellationType,
+                        pseudorangeRateMetersPerSecond = measurement.pseudorangeRateMetersPerSecond,
+                        pseudorangeRateUncertaintyMetersPerSecond = measurement.pseudorangeRateUncertaintyMetersPerSecond,
+                        cn0DbHz = measurement.cn0DbHz,
+                        state = measurement.state,
+                    )
+                }
+                lastGnssMeasurementSnapshot = GnssMeasurementSnapshot(
+                    clockBiasNanos = if (clock.hasBiasNanos()) clock.biasNanos else null,
+                    clockBiasUncertaintyNanos = if (clock.hasBiasUncertaintyNanos()) clock.biasUncertaintyNanos else null,
+                    clockDriftNanosPerSecond = if (clock.hasDriftNanosPerSecond()) clock.driftNanosPerSecond else null,
+                    clockDriftUncertaintyNanosPerSecond =
+                        if (clock.hasDriftUncertaintyNanosPerSecond()) clock.driftUncertaintyNanosPerSecond else null,
+                    measurements = measurements,
+                )
+            }
+
+            // Diagnostic only (G12 phase 1): whether the device actually supports raw GNSS
+            // measurements at all -- more reliable than inferring it from onGnssMeasurementsReceived
+            // simply never firing, which can also mean "no fix yet".
+            override fun onStatusChanged(status: Int) {
+                Log.d(TAG, "GnssMeasurementsEvent.Callback.onStatusChanged: ${statusName(status)}")
+            }
+        }
+        try {
+            locationManager.registerGnssMeasurementsCallback(callback, handler)
+            gnssMeasurementsCallback = callback
+        } catch (_: SecurityException) {
+        }
+    }
+
+    private fun statusName(status: Int): String = when (status) {
+        GnssMeasurementsEvent.Callback.STATUS_READY -> "STATUS_READY"
+        GnssMeasurementsEvent.Callback.STATUS_NOT_SUPPORTED -> "STATUS_NOT_SUPPORTED"
+        GnssMeasurementsEvent.Callback.STATUS_LOCATION_DISABLED -> "STATUS_LOCATION_DISABLED"
+        GnssMeasurementsEvent.Callback.STATUS_NOT_ALLOWED -> "STATUS_NOT_ALLOWED"
+        else -> "UNKNOWN($status)"
     }
 
     private fun sensorAvailability(): SensorAvailability {
@@ -302,6 +357,7 @@ class RunSessionService : Service() {
             reliability = reliability,
             qualityTier = qualityTier,
             now = now,
+            measurementSnapshot = lastGnssMeasurementSnapshot,
         ) ?: return
 
         trackPoints += TrackPoint(
@@ -369,6 +425,9 @@ class RunSessionService : Service() {
         gnssStatusCallback?.let { getSystemService(LocationManager::class.java)?.unregisterGnssStatusCallback(it) }
         gnssStatusCallback = null
         lastGnssSnapshot = null
+        gnssMeasurementsCallback?.let { getSystemService(LocationManager::class.java)?.unregisterGnssMeasurementsCallback(it) }
+        gnssMeasurementsCallback = null
+        lastGnssMeasurementSnapshot = null
         restartMarkerPrefs().edit().putBoolean(KEY_SESSION_OPEN, false).apply()
         eventLogger?.stop()
         eventLogger = null
@@ -434,6 +493,7 @@ class RunSessionService : Service() {
         const val ACTION_STOP = "dev.fred.pacorun.action.STOP_RUN_SESSION"
         const val ACTION_APP_FOREGROUNDED = "dev.fred.pacorun.action.APP_FOREGROUNDED"
         const val ACTION_APP_BACKGROUNDED = "dev.fred.pacorun.action.APP_BACKGROUNDED"
+        private const val TAG = "RunSessionService"
         private const val CHANNEL_ID = "run_session"
         private const val NOTIFICATION_ID = 1
         private const val KEY_SESSION_OPEN = "session_open"
